@@ -1,0 +1,13 @@
+{{define "content"}}<h1>{{.T.SignInTitle}}</h1>
+{{with .Notice}}<p class="notice" role="status">{{.}}</p>{{end}}
+{{with .Info}}<p class="info" role="status">{{.}}</p>{{end}}
+{{with .Error}}<p class="error" role="alert">{{.}}</p>{{end}}
+{{if not .NoForm}}<form method="post" action="/_lab/login">
+<input type="hidden" name="next" value="{{.Next}}">
+<input class="visually-hidden" type="text" name="username" value="lab" autocomplete="username" tabindex="-1" aria-hidden="true" readonly>
+<label for="password">{{.T.Password}}</label>
+<input id="password" name="password" type="password" autocomplete="current-password" maxlength="1024" required autofocus>
+<button type="submit">{{.T.SignIn}}</button>
+</form>
+{{end}}<p class="hint">{{.T.SignInHelp}}</p>
+{{end}}

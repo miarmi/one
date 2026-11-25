@@ -1,0 +1,82 @@
+{{template "head" "ONE"}}
+<body class="page-list page-panes">
+{{template "topbar" .}}
+<aside class="pane-left" id="pane-left" aria-label="Stages and connections">
+  <nav class="stages" aria-label="Stages">
+    <ul>
+      {{- range .List.Groups}}
+      <li><button type="button" class="stage-btn js-stage" data-stage="{{.Stage}}" aria-pressed="false"><span class="st-name">{{.Name}}</span><span class="st-approve" data-approve="{{.Stage}}">{{.Approve}}</span><span class="st-count" data-count="{{.Stage}}">{{.Count}}</span></button></li>
+      {{- end}}
+      <li><a class="stage-btn" id="stage-closed" href="/closed"><span class="st-name">Closed</span><span class="st-count" id="stage-closed-n">{{.ClosedN}}</span></a></li>
+    </ul>
+  </nav>
+  <div id="conns-slot">{{template "connections" .Conns}}</div>
+</aside>
+<main class="list-page" id="list" data-since="{{.List.Since}}">
+  <div class="mid-head" id="mid-head"><h2 class="mid-name" id="mid-name"></h2><span class="mid-count" id="mid-count"></span></div>
+  {{if .Only}}<div class="only-conn" id="only-conn" data-conn="{{.Only.Key}}"><span class="only-text">Only {{.Only.Name}}</span><form method="get" action="/"><button type="submit" class="secondary">Show all</button></form></div>{{end}}
+  <button type="button" class="secondary" id="new-items" hidden></button>
+  {{if .List.Empty}}
+  <p class="empty">Nothing here yet.</p>
+  {{else}}
+  <ul class="groups">
+    {{- range .List.Groups}}
+    <li class="group" data-stage="{{.Stage}}">
+      <h3><button type="button" class="g-head js-group" aria-expanded="false" aria-controls="g-{{.Stage}}">
+        <span class="g-name">{{.Name}}</span><span class="g-count" data-count="{{.Stage}}">{{.Count}}</span>{{if eq .Stage "pending"}}<span class="g-wait" id="g-wait">{{.Wait}}</span>{{end}}<span class="g-approve" data-approve="{{.Stage}}">{{.Approve}}</span>
+      </button></h3>
+      <ol class="rows" id="g-{{.Stage}}" hidden></ol>
+    </li>
+    {{- if eq .Stage "in_progress"}}
+    <li class="group group-todo" data-stage="todo">
+      <h3><button type="button" class="g-head js-group" aria-expanded="false" aria-controls="g-todo">
+        <span class="g-name">To do</span><span class="g-count" data-count="todo">{{len $.Agenda.Todos}}</span>
+      </button></h3>
+      <div class="todo-rows" id="g-todo" data-loaded="1" hidden>
+        <p class="empty td-none"{{if $.Agenda.Todos}} hidden{{end}}>Nothing to do.</p>
+        <ul class="td-list">
+          {{- range $.Agenda.Todos}}
+          <li class="ag-td">
+            <span class="ag-main"><span class="ag-title">{{.Text}}</span>{{if .Due}}<span class="ag-meta ag-due">{{.Due}}</span>{{end}}{{if .Number}}<a class="ag-meta" href="/items/{{.ItemID}}">{{.Number}}</a>{{end}}</span>
+            <form method="post" action="/agenda/{{.ID}}/done" data-ajax="agenda"><button type="submit" class="tertiary ag-done"><span class="ag-done-t">Done</span></button></form>
+          </li>
+          {{- end}}
+        </ul>
+        <div class="td-props">{{template "ag-props" $.Agenda.Proposals}}</div>
+        <form method="post" action="/agenda/todos" class="ag-add td-add" data-ajax="agenda">
+          <label for="td-new">Add a to-do</label>
+          <div class="ag-add-row"><input type="text" id="td-new" name="text" maxlength="300" autocomplete="off" enterkeyhint="done"><button type="submit">Add</button></div>
+          <p class="say-error" role="alert" hidden></p>
+        </form>
+      </div>
+    </li>
+    {{- end}}
+    {{- end}}
+  </ul>
+  {{end}}
+  <p class="closed-link" id="closed-link"{{if not .ClosedN}} hidden{{end}}>{{if .ClosedN}}<a href="/closed">{{.ClosedText}}</a>{{end}}</p>
+</main>
+<aside id="agenda" class="agenda" aria-label="Agenda" data-url="/agenda" hidden>
+  <div class="ag-bar"><h2>Agenda</h2><span class="ag-date">{{.Agenda.Date}}</span><span class="ag-bar-acts"><button type="button" class="tertiary ag-now-btn js-now">Now</button><button type="button" class="tertiary js-agenda-toggle">Close</button></span></div>
+  <div id="ag-body">{{template "agenda-body" .Agenda}}</div>
+</aside>
+<footer><span class="env">Environment: {{.EnvText}}</span><span>Version: {{.Version}}</span></footer>
+<script src="/static/app.js"></script>
+</body>
+</html>
+
+{{define "connections"}}<section class="conns" id="conns" aria-labelledby="conns-h">
+  <h2 class="conns-h" id="conns-h">Connections</h2>
+  <ul class="conn-lines">
+    {{- range .Lines}}
+    <li class="conn-li conn-{{.Cls}}{{if .On}} conn-on{{end}}"><a class="conn-line"{{if .On}} aria-current="true"{{end}} href="{{if .Href}}{{.Href}}{{else}}/connectors{{end}}" title="{{.Title}}"><span class="conn-dot" aria-hidden="true"></span><span class="conn-name">{{.Name}}</span><span class="conn-main">{{.Main}}</span><span class="conn-sub">{{.Sub}}</span>{{if .Alert}}<span class="visually-hidden">{{.Alert}}</span>{{end}}</a></li>
+    {{- end}}
+  </ul>
+  {{- if .Notes}}
+  <ul class="conn-notes">
+    {{- range .Notes}}
+    <li class="conn-note conn-{{.Cls}}"><a href="{{.Href}}">{{.Text}}</a>{{if .Dismiss}}<form method="post" action="/night/dismiss"><button type="submit" class="conn-x">Dismiss</button></form>{{end}}</li>
+    {{- end}}
+  </ul>
+  {{- end}}
+</section>{{end}}

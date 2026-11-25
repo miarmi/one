@@ -1,0 +1,23 @@
+{{template "head" "Notes"}}
+<body class="page-conn page-notes">
+{{template "topbar" .}}
+<main class="conn">
+  {{with .Notes}}
+  {{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}
+  {{if not .Notes}}<p class="empty">No saved notes yet.</p>{{end}}
+  <ul class="notes">
+    {{- range .Notes}}
+    <li class="card note" id="note-{{.ID}}">
+      <h2 class="n-title"><a href="/notes/{{.ID}}">{{.Title}}</a></h2>
+      <p class="n-body">{{.Preview}}</p>
+      <p class="muted">{{if .Person}}About {{.Person}} · {{end}}{{if .Item}}About <a href="/items/{{.ItemID}}">{{.Item}}</a> · {{end}}{{.By}} · <time datetime="{{.ISO}}" title="{{.WhenFull}}">{{.When}}</time></p>
+    </li>
+    {{- end}}
+  </ul>
+  {{if .More}}<p class="more-link"><a href="/notes?offset={{.More}}">Show more</a></p>{{end}}
+  {{end}}
+</main>
+<footer><span class="env">Environment: {{.EnvText}}</span><span>Version: {{.Version}}</span></footer>
+<script src="/static/app.js"></script>
+</body>
+</html>

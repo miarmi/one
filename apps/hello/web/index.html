@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Hello</title>
+<meta name="theme-color" content="#2f6f4f">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Hello">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="icon" href="/icon-192.png" type="image/png">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<main>
+  <header>
+    <h1>Hello</h1>
+    <p class="env">Environment: {{.EnvText}}</p>
+  </header>
+
+  <form class="add" method="post" action="/notes">
+    <label for="note">Note</label>
+    <div class="row">
+      <input id="note" name="text" type="text" maxlength="280" autocomplete="off" enterkeyhint="send" value="{{.Draft}}"{{if .Message}} aria-describedby="message" aria-invalid="true"{{end}}>
+      <button type="submit">Add</button>
+    </div>
+    {{if .Message}}<p id="message" class="message" role="alert">{{.Message}}</p>{{end}}
+  </form>
+
+  <ul class="notes" aria-label="Notes">
+    {{range .Notes}}<li>
+      <p class="text">{{.Text}}</p>
+      <form method="post" action="/notes/{{.ID}}/delete">
+        <button type="submit" class="delete">Delete</button>
+      </form>
+    </li>
+    {{end}}
+  </ul>
+  {{if not .Notes}}<p class="empty">No notes yet.</p>{{end}}
+</main>
+<footer>Version: {{.Version}}</footer>
+</body>
+</html>

@@ -1,0 +1,495 @@
+{{template "head" "Connectors"}}
+<body class="page-conn page-connectors">
+{{template "topbar" .}}
+<main class="conn">
+  {{if .Conn.PicNotice}}<p class="notice" role="status">{{.Conn.PicNotice}}</p>{{end}}
+  {{if .Conn.PicError}}<p class="notice error" role="alert">{{.Conn.PicError}}</p>{{end}}
+
+  {{/* Each connection is one row that opens on a click (the owner, 2026-11-19: respect vertical space). The row says the name, the state,
+       who it is connected as, when it was last read and, when there is one, the latest error, which is never hidden. */}}
+
+  {{if not (index $.Conn.Removed "gmail")}}<section class="crow" id="gmail" aria-labelledby="h-gmail"><details class="crow-d"{{if or .Gmail.Notice .Gmail.Error}} open{{end}}>
+    {{with .Gmail}}
+    <summary class="crow-head">
+      {{template "srcpic" (index $.Conn.Pics "gmail")}}<h2 class="crow-name" id="h-gmail"><a class="crow-link" href="/?conn=gmail">Gmail</a></h2><span class="src-status {{.StatusCls}}">{{.Status}}</span>
+      <span class="crow-info">Last 24 hours: {{template "items" (index $.Conn.Items24 "gmail")}}</span>
+      {{if eq .Status "Stale"}}<span class="crow-acts"><button type="submit" form="f-gmail-remove">Remove</button></span>{{end}}
+      {{if .Connected}}<span class="crow-info">Connected as <b>{{.Address}}</b></span>{{end}}
+      {{if .LastRead}}<span class="crow-info">Last read: {{.LastRead}}</span>{{end}}
+      {{template "rowerror" .}}
+      {{if .Connected}}<span class="crow-acts"><button type="submit" form="f-gmail-test">Test now</button></span>{{end}}
+    </summary>
+    <div class="crow-body">
+      {{if eq .Status "Stale"}}<form method="post" action="/connectors/gmail/remove" id="f-gmail-remove"></form>{{end}}
+      {{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}
+      {{if .Error}}<p class="notice error" role="alert">{{.Error}}</p>{{end}}
+      {{if .Connected}}
+      <form method="post" action="/connectors/gmail/test" id="f-gmail-test"></form>
+      <div class="crow-cols">
+        <div>
+          <div class="acts">
+            <form method="post" action="/connectors/gmail/send"><button type="submit" class="secondary">Send a test mail to myself</button></form>
+            <form method="post" action="/connectors/gmail/disconnect"><button type="submit" class="tertiary">Disconnect</button></form>
+          </div>
+          {{template "last" .Test}}
+          {{template "lastsend" .Send}}
+        </div>
+        <div>
+          {{template "importblock" .}}
+          {{template "historyblock" .}}
+        </div>
+      </div>
+      {{else}}
+      <p class="hint">Reads and sends mail with a Google app password (made under Google Account, Security, 2-Step Verification, App passwords). It is kept on the server and never shown again.</p>
+      <form method="post" action="/connectors/gmail" class="ic-form ic-row" autocomplete="off">
+        <div class="fld"><label for="g-addr">Gmail address</label>
+        <input type="email" id="g-addr" name="address" autocomplete="username" required maxlength="200" spellcheck="false" autocapitalize="off"></div>
+        <div class="fld"><label for="g-pass">App password</label>
+        <input type="password" id="g-pass" name="password" autocomplete="new-password" required maxlength="100"></div>
+        <button type="submit">Connect</button>
+      </form>
+      {{end}}
+      <div class="crow-pic">{{template "picform" (index $.Conn.Pics "gmail")}}</div>
+    </div>
+    {{end}}
+  </details></section>{{end}}
+
+  {{if not (index $.Conn.Removed "outlook")}}<section class="crow" id="graph" aria-labelledby="h-graph"><details class="crow-d"{{if or .Graph.Notice .Graph.Error (eq .Graph.Flow.State "pending")}} open{{end}}>
+    {{with .Graph}}
+    <summary class="crow-head">
+      {{template "srcpic" (index $.Conn.Pics "outlook")}}<h2 class="crow-name" id="h-graph"><a class="crow-link" href="/?conn=outlook">Office mail</a></h2><span class="src-status {{.StatusCls}}">{{.Status}}</span>
+      <span class="crow-info">Last 24 hours: {{template "items" (index $.Conn.Items24 "outlook")}}</span>
+      {{if eq .Status "Stale"}}<span class="crow-acts"><button type="submit" form="f-graph-remove">Remove</button></span>{{end}}
+      {{if .Connected}}<span class="crow-info">Connected as <b>{{.Address}}</b></span>{{end}}
+      {{if .LastRead}}<span class="crow-info">Last read: {{.LastRead}}</span>{{end}}
+      {{template "rowerror" .}}
+      {{if .Connected}}<span class="crow-acts"><button type="submit" form="f-graph-test">Test now</button></span>{{else if .HasIDs}}{{if ne .Flow.State "pending"}}<span class="crow-acts"><button type="submit" form="f-graph-signin">Sign in</button></span>{{end}}{{end}}
+    </summary>
+    <div class="crow-body">
+      {{if eq .Status "Stale"}}<form method="post" action="/connectors/outlook/remove" id="f-graph-remove"></form>{{end}}
+      {{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}
+      {{if .Error}}<p class="notice error" role="alert">{{.Error}}</p>{{end}}
+      {{if .Connected}}
+      <form method="post" action="/connectors/graph/test" id="f-graph-test"></form>
+      <div class="crow-cols">
+        <div>
+          <div class="acts">
+            <form method="post" action="/connectors/graph/send"><button type="submit" class="secondary">Send a test mail to myself</button></form>
+            <form method="post" action="/connectors/graph/disconnect"><button type="submit" class="tertiary">Disconnect</button></form>
+          </div>
+          {{template "last" .Test}}
+          {{template "lastsend" .Send}}
+        </div>
+        <div>
+          {{template "importblock" .}}
+          {{template "historyblock" .}}
+        </div>
+      </div>
+      {{else}}
+      <p class="hint">Reads and sends Microsoft 365 mail (every folder except Drafts, Deleted Items and Junk) and reads the calendar, through an application registered in the Office tenant. You sign in once with a code; there is no client secret.</p>
+      <form method="post" action="/connectors/graph/save" class="ic-form ic-row" autocomplete="off">
+        <div class="fld"><label for="m-tenant">Directory (tenant) ID</label>
+        <input type="text" id="m-tenant" name="tenant" value="{{.Tenant}}" required maxlength="100" spellcheck="false" autocapitalize="off"></div>
+        <div class="fld"><label for="m-client">Application (client) ID</label>
+        <input type="text" id="m-client" name="client" value="{{.Client}}" required maxlength="40" spellcheck="false" autocapitalize="off"></div>
+        <button type="submit" class="secondary">Save</button>
+      </form>
+      {{if eq .Flow.State "pending"}}
+      <div class="flow" id="flow" data-state="pending" role="status">
+        <p>Open <a href="{{.Flow.Verify}}" rel="noopener noreferrer" target="_blank">{{.Flow.Verify}}</a> and type this code:</p>
+        <p class="code">{{.Flow.UserCode}}</p>
+        <p class="hint">This page notices when you have finished.</p>
+      </div>
+      {{else if .HasIDs}}
+      <form method="post" action="/connectors/graph/signin" id="f-graph-signin" class="acts"><button type="submit">Sign in</button></form>
+      {{end}}
+      {{end}}
+      <div class="crow-pic">{{template "picform" (index $.Conn.Pics "outlook")}}</div>
+    </div>
+    {{end}}
+  </details></section>{{end}}
+
+  {{if not (index $.Conn.Removed "icloud")}}<section class="crow" id="icloud" aria-labelledby="h-icloud"><details class="crow-d"{{if or .ICloud.Notice .ICloud.Error}} open{{end}}>
+    {{with .ICloud}}
+    <summary class="crow-head">
+      {{template "srcpic" (index $.Conn.Pics "icloud")}}<h2 class="crow-name" id="h-icloud">iCloud Calendar</h2><span class="src-status {{.StatusCls}}">{{.Status}}</span>
+      <span class="crow-info">Last 24 hours: {{template "items" (index $.Conn.Items24 "icloud")}}</span>
+      {{if eq .Status "Stale"}}<span class="crow-acts"><button type="submit" form="f-icloud-remove">Remove</button></span>{{end}}
+      {{if .Connected}}<span class="crow-info">Connected as <b>{{.AppleID}}</b></span>{{end}}
+      {{if .LastRead}}<span class="crow-info">Last read: {{.LastRead}}</span>{{end}}
+      {{template "rowerror" .}}
+      {{if .Connected}}<span class="crow-acts"><button type="submit" form="f-icloud-test">Test now</button></span>{{end}}
+    </summary>
+    <div class="crow-body">
+      {{if eq .Status "Stale"}}<form method="post" action="/connectors/icloud/remove" id="f-icloud-remove"></form>{{end}}
+      {{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}
+      {{if .Error}}<p class="notice error" role="alert">{{.Error}}</p>{{end}}
+      {{if .Connected}}
+      <form method="post" action="/connectors/icloud/test" id="f-icloud-test"></form>
+      <div class="crow-cols">
+        <div>
+          <div class="acts">
+            <form method="post" action="/connectors/icloud/disconnect" data-confirm="Disconnect iCloud? The password and the events it brought are removed."><button type="submit" class="tertiary">Disconnect</button></form>
+          </div>
+          {{template "last" .Test}}
+        </div>
+        <div>
+          {{if .Calendars}}
+          <form method="post" action="/connectors/icloud/calendars" class="cal-list">
+            {{$people := .People}}
+            {{range .Calendars}}{{$c := .}}
+            <fieldset class="cal-row">
+              <legend>{{.Name}}</legend>
+              <input type="hidden" name="key{{.Field}}" value="{{.Key}}">
+              <label class="check"><input type="checkbox" name="show{{.Field}}" value="1"{{if .Show}} checked{{end}}> Show in agenda</label>
+              <label class="whose" for="whose{{.Field}}">Whose</label>
+              <select id="whose{{.Field}}" name="whose{{.Field}}">
+                <option value="0"{{if $c.Whose 0}} selected{{end}}>Me</option>
+                {{range $people}}<option value="{{.ID}}"{{if $c.Whose .ID}} selected{{end}}>{{.Label}}</option>{{end}}
+              </select>
+            </fieldset>
+            {{end}}
+            <button type="submit" class="secondary">Save</button>
+          </form>
+          {{else}}<p class="muted">No calendars found yet. Press Test now.</p>{{end}}
+        </div>
+      </div>
+      {{else}}
+      <p class="hint">Reads your iCloud calendars, and the ones shared with you, to show them in the agenda. Make an app-specific password at appleid.apple.com under Sign-In and Security. It is kept on the server and never shown again. ONE only reads.</p>
+      <form method="post" action="/connectors/icloud" class="ic-form ic-row" autocomplete="off">
+        <div class="fld"><label for="i-id">Apple ID</label>
+        <input type="text" id="i-id" name="apple_id" autocomplete="username" required maxlength="200" spellcheck="false" autocapitalize="off"></div>
+        <div class="fld"><label for="i-pass">App-specific password</label>
+        <input type="password" id="i-pass" name="password" autocomplete="new-password" required maxlength="200"></div>
+        <button type="submit">Connect</button>
+      </form>
+      {{end}}
+      <div class="crow-pic">{{template "picform" (index $.Conn.Pics "icloud")}}</div>
+    </div>
+    {{end}}
+  </details></section>{{end}}
+
+  {{if not (index $.Conn.Removed "bridge")}}<section class="crow" id="chatbridge" aria-labelledby="h-chatbridge"><details class="crow-d"{{if .Bridge.Notice}} open{{end}}>
+    {{with .Bridge}}
+    <summary class="crow-head">
+      {{template "srcpic" (index $.Conn.Pics "bridge")}}<h2 class="crow-name" id="h-chatbridge"><a class="crow-link" href="/?conn=bridge">Chat bridge</a></h2><span class="src-status {{.StatusCls}}">{{.Status}}</span>
+      <span class="crow-info">Last 24 hours: {{template "items" (index $.Conn.Items24 "bridge")}}</span>
+      {{if eq .Status "Stale"}}<span class="crow-acts"><button type="submit" form="f-chatbridge-remove">Remove</button></span>{{end}}
+      {{if .Heard}}<span class="crow-info">Last read: {{.LastRead}}</span>{{end}}
+      {{if .LatestError}}<span class="crow-error" role="alert">{{.LatestError}}{{if .ErrorAt}} <span class="muted">({{.ErrorAt}})</span>{{end}}</span>{{end}}
+    </summary>
+    <div class="crow-body">
+      {{if eq .Status "Stale"}}<form method="post" action="/connectors/bridge/remove" id="f-chatbridge-remove"></form>{{end}}
+      <div class="crow-cols">
+        <div>
+          {{if .Heard}}
+          <dl class="facts">
+            <dt>Brought in</dt><dd>{{.Chats}} {{if eq .Chats 1}}chat{{else}}chats{{end}}, {{.Messages}} {{if eq .Messages 1}}message{{else}}messages{{end}}</dd>
+            <dt>Chats and messages, last 24 hours</dt><dd>{{.Items24}} {{if eq .Items24 1}}chat{{else}}chats{{end}}, {{.Messages24}} {{if eq .Messages24 1}}message{{else}}messages{{end}}</dd>
+            {{if .Version}}<dt>Bridge version</dt><dd>{{.Version}}</dd>{{end}}
+          </dl>
+          {{if .Networks}}<ul class="nets">{{range .Networks}}<li><b>{{.Name}}</b> <span class="src-status {{.Cls}}">{{.State}}</span>{{if .Detail}} <span class="muted">{{.Detail}}</span>{{end}}{{if .Logins}}<br><span class="muted logins">{{.Logins}}</span>{{end}}</li>{{end}}</ul>{{end}}
+          {{else}}
+          <p class="hint">Nothing has been heard from the Mac yet. Install the bridge there (see its README), put the Bridge token below into it, and this row turns OK within a minute.</p>
+          {{end}}
+        </div>
+        <div>
+        </div>
+      </div>
+      <div class="crow-pic">{{template "picform" (index $.Conn.Pics "bridge")}}{{template "picform" (index $.Conn.Pics "messenger")}}{{template "picform" (index $.Conn.Pics "whatsapp")}}{{template "picform" (index $.Conn.Pics "imessage")}}{{template "picform" (index $.Conn.Pics "sms")}}</div>
+    </div>
+    {{end}}
+  </details></section>{{end}}
+
+  {{if not (index $.Conn.Removed "outlookcal")}}<section class="crow" id="outlookcal" aria-labelledby="h-outlookcal"><details class="crow-d"{{if or .OutCal.Notice .OutCal.Error}} open{{end}}>
+    {{with .OutCal}}
+    <summary class="crow-head">
+      {{template "srcpic" (index $.Conn.Pics "outlookcal")}}<h2 class="crow-name" id="h-outlookcal">Outlook Calendar</h2><span class="src-status {{.StatusCls}}">{{.Status}}</span>
+      <span class="crow-info">Last 24 hours: {{template "items" (index $.Conn.Items24 "outlookcal")}}</span>
+      {{if eq .Status "Stale"}}<span class="crow-acts"><button type="submit" form="f-outlookcal-remove">Remove</button></span>{{end}}
+      {{if .LastRead}}<span class="crow-info">Last read: {{.LastRead}}</span>{{end}}
+      {{template "rowerror" .}}
+      {{if .Signed}}<span class="crow-acts"><button type="submit" form="f-outlookcal-test">Test now</button></span>{{end}}
+    </summary>
+    <div class="crow-body">
+      {{if eq .Status "Stale"}}<form method="post" action="/connectors/outlookcal/remove" id="f-outlookcal-remove"></form>{{end}}
+      {{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}
+      {{if .Error}}<p class="notice error" role="alert">{{.Error}}</p>{{end}}
+      {{if .Signed}}
+      <form method="post" action="/connectors/outlookcal/test" id="f-outlookcal-test"></form>
+      <p class="hint">Reads the Office calendar with the same sign-in as Office mail.</p>
+      {{template "last" .Test}}
+      {{else}}
+      <p class="hint">Uses the Office mail sign-in. Sign in under Office mail above, and the calendar follows.</p>
+      {{end}}
+      <div class="crow-pic">{{template "picform" (index $.Conn.Pics "outlookcal")}}</div>
+    </div>
+    {{end}}
+  </details></section>{{end}}
+
+  {{if not (index $.Conn.Removed "googlecal")}}<section class="crow" id="google" aria-labelledby="h-google"><details class="crow-d"{{if or .Google.Notice .Google.Error}} open{{end}}>
+    {{with .Google}}
+    <summary class="crow-head">
+      {{template "srcpic" (index $.Conn.Pics "googlecal")}}<h2 class="crow-name" id="h-google">Google Calendar</h2><span class="src-status {{.StatusCls}}">{{.Status}}</span>
+      <span class="crow-info">Last 24 hours: {{template "items" (index $.Conn.Items24 "googlecal")}}</span>
+      {{if eq .Status "Stale"}}<span class="crow-acts"><button type="submit" form="f-google-remove">Remove</button></span>{{end}}
+      {{if .LastRead}}<span class="crow-info">Last read: {{.LastRead}}</span>{{end}}
+      {{template "rowerror" .}}
+      {{if .Connected}}<span class="crow-acts"><button type="submit" form="f-google-test">Test now</button></span>{{end}}
+    </summary>
+    <div class="crow-body">
+      {{if eq .Status "Stale"}}<form method="post" action="/connectors/googlecal/remove" id="f-google-remove"></form>{{end}}
+      {{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}
+      {{if .Error}}<p class="notice error" role="alert">{{.Error}}</p>{{end}}
+      <div class="crow-cols">
+        <div>
+          {{if .Connected}}
+          <form method="post" action="/connectors/google/test" id="f-google-test"></form>
+          <ul class="gc-list">
+            {{range .Calendars}}
+            <li class="ic-who">
+              <p>Connected: <b>{{.Name}}</b> <span class="muted">(address ends …{{.Tail}})</span></p>
+              <form method="post" action="/connectors/google/disconnect" class="inline" data-confirm="Disconnect this calendar? The address and the events it brought are removed."><input type="hidden" name="key" value="{{.Key}}"><button type="submit" class="tertiary">Disconnect</button></form>
+            </li>
+            {{end}}
+          </ul>
+          {{template "last" .Test}}
+          <form method="post" action="/connectors/google/calendars" class="cal-list">
+            {{$people := .People}}
+            {{range .Calendars}}{{$c := .}}
+            <fieldset class="cal-row">
+              <legend>{{.Name}}</legend>
+              <input type="hidden" name="key{{.Field}}" value="{{.Key}}">
+              <label class="check"><input type="checkbox" name="show{{.Field}}" value="1"{{if .Show}} checked{{end}}> Show in agenda</label>
+              <label class="whose" for="gwhose{{.Field}}">Whose</label>
+              <select id="gwhose{{.Field}}" name="whose{{.Field}}">
+                <option value="0"{{if $c.Whose 0}} selected{{end}}>Me</option>
+                {{range $people}}<option value="{{.ID}}"{{if $c.Whose .ID}} selected{{end}}>{{.Label}}</option>{{end}}
+              </select>
+            </fieldset>
+            {{end}}
+            <button type="submit" class="secondary">Save</button>
+          </form>
+          <h3 class="sub">Connect another calendar</h3>
+          {{end}}
+          <p class="hint">Reads a Google calendar, to show it in the agenda, through the calendar's secret address in iCal format. In Google Calendar open the calendar's settings, then Integrate calendar, and copy Secret address in iCal format. It is kept on the server and never shown again. ONE only reads. Connect one calendar at a time.</p>
+          <form method="post" action="/connectors/google" class="ic-form ic-row" autocomplete="off">
+            <div class="fld"><label for="g-name">Calendar name</label>
+            <input type="text" id="g-name" name="name" required maxlength="80" autocapitalize="sentences"></div>
+            <div class="fld"><label for="g-addr">Secret address in iCal format</label>
+            <input type="password" id="g-addr" name="address" autocomplete="off" required maxlength="400" spellcheck="false" autocapitalize="off"></div>
+            <button type="submit">Connect</button>
+          </form>
+        </div>
+        <div>
+        </div>
+      </div>
+      <div class="crow-pic">{{template "picform" (index $.Conn.Pics "googlecal")}}</div>
+    </div>
+    {{end}}
+  </details></section>{{end}}
+
+  <section class="crow" id="notify" aria-labelledby="h-notify"><details class="crow-d"{{if .Conn.Notify.Error}} open{{end}}>
+    {{with .Conn.Notify}}
+    <summary class="crow-head">
+      <h2 class="crow-name" id="h-notify">Notify</h2><span class="src-status {{.Cls}}">{{.Status}}</span>
+      {{if .Last}}<span class="crow-info">Last read: {{.Last}}</span>{{end}}
+      <span class="crow-info">Last 24 hours: {{.Count24}} {{if eq .Count24 1}}notice{{else}}notices{{end}} sent</span>
+      {{if .Error}}<span class="crow-error" role="alert">{{.Error}}{{if .ErrorAt}} <span class="muted">({{.ErrorAt}})</span>{{end}}</span>{{end}}
+      <span class="crow-acts"><button type="submit" form="f-notify-test">Test now</button></span>
+    </summary>
+    <div class="crow-body">
+      <form method="post" action="/connectors/notify/test" id="f-notify-test"></form>
+      <p class="hint">ONE tells the owner's phone when a source has stopped or needs a login, and when a reply could not be sent.{{if .Note}} {{.Note}}{{end}}</p>
+      {{template "last" .Test}}
+    </div>
+    {{end}}
+  </details></section>
+
+  <section class="crow" id="claude" aria-labelledby="h-claude"><details class="crow-d">
+    {{with .Conn.Claude}}
+    <summary class="crow-head">
+      <h2 class="crow-name" id="h-claude">Claude</h2><span class="src-status {{.Cls}}">{{.Status}}</span>
+      {{if .LastCall}}<span class="crow-info">Last call: {{.LastCall}}</span>{{else}}<span class="crow-info">No agent has called yet</span>{{end}}
+    </summary>
+    <div class="crow-body">
+      <p class="hint">Shows who reads new items: ONE itself, when a Claude API key is saved below, or an outside agent coming in with the agent token, at <code>/api/</code> or through the connector.</p>
+      <dl class="facts">
+        {{if .Mode}}<dt>At work</dt><dd>{{.Mode}}</dd>{{end}}
+        {{if .Spend}}<dt>Spend</dt><dd>{{.Spend}}</dd>{{end}}
+        {{if .LastRan}}<dt>Last ran</dt><dd>{{.LastRan}}</dd>{{end}}
+        {{if .NightRan}}<dt>Night check ran</dt><dd>{{.NightRan}}</dd>{{end}}
+      </dl>
+      {{if .Nights}}<ul class="nets">{{range .Nights}}<li>{{.}}</li>{{end}}</ul>{{end}}
+    </div>
+    {{end}}
+  </details></section>
+
+  <section class="crow" id="claudeapi" aria-labelledby="h-claudeapi"><details class="crow-d"{{if or .ClaudeAPI.Notice .ClaudeAPI.Error}} open{{end}}>
+    {{with .ClaudeAPI}}
+    <summary class="crow-head">
+      <h2 class="crow-name" id="h-claudeapi">Claude API</h2><span class="src-status {{.Cls}}">{{.Status}}</span>
+    </summary>
+    <div class="crow-body">
+      {{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}
+      {{if .Error}}<p class="notice error" role="alert">{{.Error}}</p>{{end}}
+      <p class="hint">With a key, ONE hands each new item to Claude itself and the night check runs. The key is kept on the server and never shown again. Without one, nothing is sent anywhere.</p>
+      <form method="post" action="/connectors/claude-api" class="ic-form ic-row" autocomplete="off">
+        <div class="fld"><label for="c-key">API key</label>
+        <input type="password" id="c-key" name="key" autocomplete="new-password" required maxlength="300" spellcheck="false"></div>
+        <button type="submit">Save</button>
+        <button type="submit" class="secondary" formaction="/connectors/claude-api/remove" formnovalidate data-confirm="Remove the key? ONE stops asking Claude.">Remove</button>
+      </form>
+    </div>
+    {{end}}
+  </details></section>
+
+  <section class="crow" id="agent" aria-labelledby="h-agent"><details class="crow-d"{{if .Agent.Notice}} open{{end}}>
+    {{with .Agent}}
+    <summary class="crow-head">
+      <h2 class="crow-name" id="h-agent">Agent token</h2>
+      <span class="crow-info">For Claude and other agents, at <code>/api/</code></span>
+    </summary>
+    <div class="crow-body">
+      {{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}
+      <p class="hint">Claude and other agents come in at <code>/api/</code>, and the connector at <code>/api/mcp</code>, with this token as <code>Authorization: Bearer &lt;token&gt;</code>. It can read what waits, write comments and proposals, and skip clear noise. It cannot approve, send or change a setting.</p>
+      <div class="token-row">
+        <label for="agent-token" class="visually-hidden">Agent token</label>
+        <input type="text" id="agent-token" class="token masked" value="{{.Token}}" readonly autocomplete="off" spellcheck="false">
+        <button type="button" class="secondary js-reveal" data-target="agent-token" aria-pressed="false">Show</button><button type="button" class="js-copy" data-target="agent-token">Copy</button>
+        <form method="post" action="/connectors/agent-token/new" data-confirm="Make a new token? The old one stops working at once."><button type="submit" class="secondary">New token</button></form>
+      </div>
+    </div>
+    {{end}}
+  </details></section>
+
+  <section class="crow" id="bridge" aria-labelledby="h-bridge"><details class="crow-d"{{if .Bridge.Notice}} open{{end}}>
+    {{with .Bridge}}
+    <summary class="crow-head">
+      <h2 class="crow-name" id="h-bridge">Bridge token</h2>
+      <span class="crow-info">For the Chat bridge on the Mac, at <code>/api/bridge/</code></span>
+    </summary>
+    <div class="crow-body">
+      {{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}
+      <p class="hint">The Chat bridge on the Mac comes in at <code>/api/bridge/</code> with this token as <code>Authorization: Bearer &lt;token&gt;</code>. It can bring chats, messages and files, ask for the chat replies you approved and report how they went. It cannot read anything, approve, send or change a setting, and it is not the agent token.</p>
+      <div class="token-row">
+        <label for="bridge-token" class="visually-hidden">Bridge token</label>
+        <input type="text" id="bridge-token" class="token masked" value="{{.Token}}" readonly autocomplete="off" spellcheck="false">
+        <button type="button" class="secondary js-reveal" data-target="bridge-token" aria-pressed="false">Show</button><button type="button" class="js-copy" data-target="bridge-token">Copy</button>
+        <form method="post" action="/connectors/bridge-token/new" data-confirm="Make a new token? The old one stops working at once, and the bridge on the Mac stays silent until it has the new one."><button type="submit" class="secondary">New token</button></form>
+      </div>
+    </div>
+    {{end}}
+  </details></section>
+
+  <section class="crow" id="worktool" aria-labelledby="h-worktool"><details class="crow-d"{{if .Pro.Notice}} open{{end}}>
+    {{with .Pro}}
+    <summary class="crow-head">
+      <h2 class="crow-name" id="h-worktool">Work tool token</h2>
+      <span class="crow-info">For Work tool, at <code>/api/private-list</code></span>
+    </summary>
+    <div class="crow-body">
+      {{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}
+      <p class="hint">Work tool, your work tool, reads your private list from ONE with this token.{{if not .Has}} There is no token now, so Work tool cannot read anything.{{end}}</p>
+      <details class="hint-fold"><summary>How Work tool connects</summary>
+        <p class="hint">It sends the token as <code>Authorization: Bearer &lt;token&gt;</code>, at <code>/api/private-list</code> or through the connector tool <code>private_list</code>. It can read that list and nothing else: no messages, no files, no search, and it cannot write, propose, approve or send. It is not the agent token.</p>
+      </details>
+      <div class="token-row">
+        <label for="worktool-token" class="visually-hidden">Work tool token</label>
+        <input type="text" id="worktool-token" class="token masked" value="{{.Token}}" readonly autocomplete="off" spellcheck="false" placeholder="No token">
+        <button type="button" class="secondary js-reveal" data-target="worktool-token" aria-pressed="false"{{if not .Has}} disabled{{end}}>Show</button><button type="button" class="js-copy" data-target="worktool-token"{{if not .Has}} disabled{{end}}>Copy</button>
+        <form method="post" action="/connectors/worktool-token/new"{{if .Has}} data-confirm="Make a new token? The old one stops working at once, and Work tool cannot read the list until it has the new one."{{end}}><button type="submit" class="secondary">New token</button></form>
+        <form method="post" action="/connectors/worktool-token/revoke" class="pro-revoke" data-confirm="Revoke the token? Work tool can no longer read the list."><button type="submit" class="secondary danger"{{if not .Has}} disabled{{end}}>Revoke</button></form>
+      </div>
+    </div>
+    {{end}}
+  </details></section>
+
+  <section class="crow" id="server" aria-labelledby="h-server"><details class="crow-d">
+    {{with .Server}}
+    <summary class="crow-head">
+      <h2 class="crow-name" id="h-server">Server</h2>
+      {{if .Error}}<span class="crow-error" role="alert">{{.Error}}</span>{{else}}<span class="crow-info">Free space: <b>{{.Info.Free}}</b> of {{.Info.Total}}</span><span class="crow-info">Data folder: <b>{{.Info.DataSize}}</b></span>{{end}}
+      <span class="crow-acts"><button type="submit" form="f-server-test">Test now</button></span>
+    </summary>
+    <div class="crow-body">
+      <form method="post" action="/connectors/server/test" id="f-server-test"></form>
+      {{if not .Error}}
+      <dl class="facts">
+        <dt>Free space</dt><dd>{{.Info.Free}} of {{.Info.Total}}</dd>
+        <dt>Data folder</dt><dd>{{.Info.DataSize}}</dd>
+      </dl>{{end}}
+      {{template "last" .Test}}
+    </div>
+    {{end}}
+  </details></section>
+
+  {{with .Conn}}
+  <section class="conn-sec" id="fetches" aria-labelledby="h-fetches"><details class="conn-fold">
+    <summary><h2 id="h-fetches">Recent fetches</h2></summary>
+    {{if .Fetches}}<div class="tbl-wrap"><table class="tbl">
+      <thead><tr><th scope="col">When</th><th scope="col">Source</th><th scope="col">Kind</th><th scope="col">Result</th><th scope="col">Items</th></tr></thead>
+      <tbody>{{range .Fetches}}<tr><td>{{.When}}</td><td>{{.Source}}</td><td>{{.Mode}}</td><td><span class="src-status {{if .Failed}}st-error{{else}}st-ok{{end}}">{{.Result}}</span>{{if .Error}} <span class="muted">{{.Error}}</span>{{end}}</td><td>{{.Counts}}</td></tr>{{end}}</tbody>
+    </table></div>{{else}}<p class="muted">Nothing has been fetched yet.</p>{{end}}
+  </details></section>
+
+  <section class="conn-sec" id="days" aria-labelledby="h-days"><details class="conn-fold">
+    <summary><h2 id="h-days">Last 14 days</h2></summary>
+    <p class="hint">Items that got a message, per day and source.</p>
+    <div class="tbl-wrap"><table class="tbl">
+      <thead><tr><th scope="col">Day</th>{{range .DayCols}}<th scope="col">{{.}}</th>{{end}}</tr></thead>
+      <tbody>{{range .Days}}<tr><th scope="row">{{.Day}}</th>{{range .Cells}}<td>{{.}}</td>{{end}}</tr>{{end}}</tbody>
+    </table></div>
+  </details></section>
+
+  <section class="conn-sec" id="limits" aria-labelledby="h-limits">
+    <h2 id="h-limits">Known limitations</h2>
+    <p class="hint">A limitation is not an error and does not turn the dot.</p>
+    {{range .Limits}}<h3 class="sub">{{.Name}}</h3>
+    <ul class="limits">{{range .Items}}<li>{{.}}</li>{{end}}</ul>{{end}}
+  </section>
+  {{end}}
+
+</main>
+<footer><span class="env">Environment: {{.EnvText}}</span><span>Version: {{.Version}}</span></footer>
+<script src="/static/app.js"></script>
+</body>
+</html>
+{{define "last"}}{{if .}}<div class="last">
+  <p class="muted">Last test: {{.When}} <span class="src-status {{if .OK}}st-ok{{else}}st-error{{end}}">{{if .OK}}OK{{else}}Error{{end}}</span></p>
+  <pre class="result">{{range $i, $l := .Result}}{{if $i}}
+{{end}}{{$l}}{{end}}</pre>
+</div>{{else}}<p class="muted">Not tested yet.</p>{{end}}{{end}}
+{{define "lastsend"}}{{if .}}<div class="last">
+  <p class="muted">Last test mail: {{.When}} <span class="src-status {{if .OK}}st-ok{{else}}st-error{{end}}">{{if .OK}}OK{{else}}Error{{end}}</span></p>
+  <p class="result-line">{{range .Result}}{{.}} {{end}}</p>
+</div>{{end}}{{end}}
+{{define "importblock"}}    <h3 class="sub">Import</h3>
+    {{with .Import}}<p class="import-line"><b>{{.Totals}}</b>{{if .Has}} {{.Line}}{{else}} No import has run yet.{{end}} <span class="muted">Last sync by the timer: {{if .LastSync}}{{.LastSync}}{{else}}not yet{{end}}</span></p>
+    {{if .Error}}<p class="notice error" role="alert">{{.Error}}</p>{{end}}{{end}}
+    <div class="acts">
+      <form method="post" action="{{.ImportAction}}"><input type="hidden" name="depth" value="week"><button type="submit" {{if .Import.Running}}disabled{{end}}>Import one week</button></form>
+      <form method="post" action="{{.ImportAction}}"><input type="hidden" name="depth" value="month"><button type="submit" {{if .Import.Running}}disabled{{end}}>Import one month</button></form>
+    </div>
+    {{with .Import}}{{if .Running}}<p id="import-running" class="visually-hidden">Import running</p>{{end}}{{end}}
+{{end}}
+{{define "historyblock"}}    <h3 class="sub">History of the whole mailbox</h3>
+    {{with .History}}<p class="import-line" id="history-state" {{if .Running}}data-running="1"{{end}}>{{.Line}}</p>
+    {{if .Error}}<p class="notice error" role="alert">{{.Error}}</p>{{end}}{{end}}
+    <p class="hint">One light line per message, back to the first: who wrote, when, whether you read, answered or starred it, and where it is kept. No text, no subject and no file is read for the years before the import. ONE only reads.</p>
+    <div class="acts">
+      <form method="post" action="{{.HistoryAction}}"><button type="submit" class="secondary" {{if .History.Running}}disabled{{end}}>Read history</button></form>
+    </div>
+{{end}}
+{{define "rowerror"}}{{if .LatestError}}<span class="crow-error" role="alert">{{.LatestError}}{{if .LatestErrorAt}} <span class="muted">({{.LatestErrorAt}})</span>{{end}}</span>{{end}}{{end}}
+
+{{define "srcpic"}}<span class="crow-badge">{{if .Img}}<img class="badge badge-img" src="{{.Img}}" alt="">{{else}}<span class="badge {{.Color}}" aria-hidden="true">{{.Badge}}</span>{{end}}</span>{{end}}
+{{define "items"}}{{.}} {{if eq . 1}}item{{else}}items{{end}}{{end}}
+{{define "picform"}}<div class="picrow"><span class="picname">{{.Label}}</span>
+  <form method="post" action="/sources/{{.Key}}/picture" enctype="multipart/form-data" class="picform">
+    <label for="srcpic-{{.Key}}" class="visually-hidden">Picture for {{.Label}}</label>
+    <input type="file" id="srcpic-{{.Key}}" name="picture" accept="image/png,image/jpeg,image/webp" required class="pic-input">
+    <button type="submit" class="tertiary js-pick">Set picture</button>
+  </form>
+  {{if .Has}}<form method="post" action="/sources/{{.Key}}/picture/remove"><button type="submit" class="tertiary">Remove picture</button></form>{{end}}
+</div>{{end}}

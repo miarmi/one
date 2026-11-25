@@ -1,0 +1,123 @@
+name: promote-data
+# Move a preview's data into production in one step, secrets included (so
+# an app's tokens and sign-ins keep working). Production's own data is kept
+# on the server as a dated backup beside the new one. Only the owner starts it,
+# by hand, typing the app's name twice; agents never do.
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: Branch whose preview holds the data (e.g. one)
+        type: string
+        required: true
+      app:
+        description: App whose data moves (e.g. one); it must already run in production
+        type: string
+        required: true
+      confirm:
+        description: Type the app name again to confirm — this replaces its production data (the old data is kept as a backup)
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: promote-data
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  promote:
+    if: github.ref == 'refs/heads/main'
+    timeout-minutes: 100
+    runs-on: ${{ vars.LAB_RUNNER || 'lab-runner' }}
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - name: Copy the preview's data into production
+        env:
+          BRANCH: ${{ inputs.branch }}
+          APP: ${{ inputs.app }}
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          . platform/scripts/gh-lib.sh
+          if [[ ! "$APP" =~ ^[a-z][a-z0-9]{1,19}$ ]]; then
+            echo "::error::'$APP' is not an app name"
+            exit 1
+          fi
+          if [[ "$CONFIRM" != "$APP" ]]; then
+            echo "::error::The confirmation does not match the app name; nothing was changed"
+            exit 1
+          fi
+          if [[ -z "$BRANCH" || "$BRANCH" == main || "$BRANCH" == -* ]] || ! env="$(platform/scripts/preview-name.sh "$BRANCH")"; then
+            echo "::error::'$BRANCH' is not a branch with a preview"
+            exit 1
+          fi
+          if [[ -z "$(jq -r '.server_ip // ""' lab.json)" ]]; then
+            echo "::error::lab.json has no server"
+            exit 1
+          fi
+          # labd starts a job and answers at once; the job's status is then
+          # polled until it is done or failed, however long the copy takes.
+          t0="$(date -u +%s)"
+          set +e
+          out="$(platform/scripts/lab-api.sh POST "/api/promote-data?app=$APP&env=$env&confirm=$APP")"
+          rc=$?
+          set -e
+          id="$(jq -r '.job.id // empty' <<<"$out" 2>/dev/null || true)"
+          if ((rc != 0)); then
+            msg="$(jq -r '.error // empty' <<<"$out" 2>/dev/null || true)"
+            if [[ -n "$msg" ]]; then
+              echo "::error::Promote refused: $msg"
+              gh_summary "Promoting **$env**'s data into **$APP** production was refused: $msg"
+              exit 1
+            fi
+            echo "No answer to the start request; looking for a job it may have started" >&2
+          fi
+          job=""
+          deadline=$((t0 + 90 * 60))
+          while :; do
+            if st="$(platform/scripts/lab-api.sh GET "/api/promote-data?app=$APP" 2>/dev/null)"; then
+              job="$(jq -c '.job // empty' <<<"$st")"
+              jid="$(jq -r '.id // empty' <<<"$job")"
+              started="$(date -u -d "$(jq -r '.started // empty' <<<"$job")" +%s 2>/dev/null || echo 0)"
+              # Our job: the id we were given, or (start answer lost) one started since.
+              if [[ -n "$jid" && ( "$jid" == "$id" || ( -z "$id" && "$started" -ge $((t0 - 60)) ) ) ]]; then
+                state="$(jq -r '.state' <<<"$job")"
+                [[ "$state" != running ]] && break
+                echo "$(date -u +%H:%M:%S) running: $(jq -r '.step' <<<"$job")"
+              elif [[ -z "$id" && $(date -u +%s) -gt $((t0 + 120)) ]]; then
+                echo "::error::The start request got no answer and labd shows no job started by it; nothing was changed by this run"
+                gh_summary "Promoting **$env**'s data into **$APP**: labd did not answer and started no job. Run it again."
+                exit 1
+              fi
+            fi
+            if (($(date -u +%s) > deadline)); then
+              echo "::error::The job is still running after 90 minutes; its outcome is unknown. Check again with the server workflow's labd log; do not start another."
+              gh_summary "Promoting **$env**'s data into **$APP**: still running after 90 minutes; outcome unknown."
+              exit 1
+            fi
+            sleep 10
+          done
+          backup="$(jq -r '.backup // ""' <<<"$job")"
+          if [[ "$state" != done ]]; then
+            msg="$(jq -r '.error // "unknown error"' <<<"$job")"
+            jq -r '.logs // empty' <<<"$job"
+            echo "::error::Promote failed: $msg"
+            kept=""
+            if [[ -n "$backup" ]]; then
+              kept="The previous production data is on the server at \`$backup\`."
+            fi
+            gh_summary "Promoting **$env**'s data into **$APP** production **failed**: $msg" \
+              "$kept"
+            exit 1
+          fi
+          gh_annotate notice "Promoted $env's data into $APP" "Production runs on the preview's data (secrets included) and passed its health check"
+          gh_summary "Promoted **$env**'s data (secrets included) into **$APP** production. It passed its health check; the preview keeps its own copy. Production's previous data is kept on the server at \`${backup:-(none: production had no data)}\` (see platform/CONTRACT.md, \"Promote data\", to restore it)."

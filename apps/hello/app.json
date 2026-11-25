@@ -1,0 +1,6 @@
+{
+  "name": "hello",
+  "title": "Hello",
+  "health": "/healthz",
+  "public": false
+}

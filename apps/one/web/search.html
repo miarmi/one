@@ -1,0 +1,30 @@
+{{template "head" "Search"}}
+<body class="page-conn page-search">
+{{template "topbar" .}}
+<main class="conn">
+  {{with .Search}}
+  <form method="get" action="/search" class="card sform" role="search">
+    <div class="fld fld-q"><label for="sq">Search</label>
+    <input type="search" id="sq" name="q" value="{{.Query}}" placeholder="Search mail, chats, events and notes" maxlength="200" autocomplete="off"></div>
+    <div class="fld fld-p"><label for="sp">Person (optional)</label>
+    <input type="text" id="sp" name="person" value="{{.Person}}" maxlength="120" autocomplete="off"></div>
+    <button type="submit">Search</button>
+  </form>
+  {{if .Error}}<p class="notice error" role="alert">{{.Error}}</p>{{end}}
+  {{if .Matched}}<p class="hint">{{.Matched}}</p>{{end}}
+  {{if .Done}}{{if not .Hits}}<p class="empty">No results.</p>{{end}}{{end}}
+  <ul class="hits">
+    {{- range .Hits}}
+    <li class="hit">
+      <p class="h-head"><span class="mark mark-kind">{{.Mark}}</span> <a href="{{.Link}}">{{if .Title}}{{.Title}}{{else}}{{.Subject}}{{end}}</a>{{if .Stage}} <span class="muted">· {{.Stage}}</span>{{end}} <span class="muted h-meta">· {{.Who}} · <time datetime="{{.ISO}}" title="{{.WhenFull}}">{{.When}}</time>{{if and .Title .Subject (ne .Title .Subject)}} · {{.Subject}}{{end}}</span></p>
+      <p class="h-snippet">{{range .Parts}}{{if .Hit}}<mark>{{.Text}}</mark>{{else}}{{.Text}}{{end}}{{end}}</p>
+    </li>
+    {{- end}}
+  </ul>
+  {{if .More}}<p class="more-link"><a href="/search?q={{.Query}}{{if .Person}}&amp;person={{.Person}}{{end}}&amp;offset={{.More}}">Show more</a></p>{{end}}
+  {{end}}
+</main>
+<footer><span class="env">Environment: {{.EnvText}}</span><span>Version: {{.Version}}</span></footer>
+<script src="/static/app.js"></script>
+</body>
+</html>

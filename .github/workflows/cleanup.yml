@@ -1,0 +1,58 @@
+name: cleanup
+# Dump = delete the branch: its previews go away. Every night, previews of
+# branches that no longer exist are removed too.
+
+on:
+  delete:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cleanup
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  cleanup:
+    if: github.event_name != 'delete' || github.event.ref_type == 'branch'
+    runs-on: ${{ vars.LAB_RUNNER || 'lab-runner' }}
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          fetch-depth: 0
+      - name: Remove previews
+        env:
+          EVENT: ${{ github.event_name }}
+          DELETED: ${{ github.event.ref }}
+        run: |
+          . platform/scripts/gh-lib.sh
+          if [[ -z "$(jq -r '.server_ip // ""' lab.json)" ]]; then
+            echo "::notice::No server configured in lab.json"
+            exit 0
+          fi
+          if [[ "$EVENT" == delete ]]; then
+            if ! preview="$(platform/scripts/preview-name.sh "$DELETED")"; then
+              echo "Branch '$DELETED' never had a preview"
+              exit 0
+            fi
+            out="$(platform/scripts/remove-previews.sh "$preview")"
+            gh_annotate notice "Previews removed" "Branch $DELETED was deleted: $out"
+            exit 0
+          fi
+          keep="$(git ls-remote --heads origin | sed 's|.*refs/heads/||' | while IFS= read -r b; do
+            [[ "$b" == main ]] && continue
+            platform/scripts/preview-name.sh "$b" 2>/dev/null || true
+          done | jq -R . | jq -cs '{previews: .}')"
+          printf '%s\n' "$keep" >"$RUNNER_TEMP/keep.json"
+          out="$(platform/scripts/lab-api.sh POST /api/gc "$RUNNER_TEMP/keep.json")"
+          gh_annotate notice "Preview cleanup" "$out"

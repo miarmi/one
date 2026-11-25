@@ -1,0 +1,8 @@
+{
+  "domain": "lab.example.com",
+  "server_ip": "203.0.113.10",
+  "repo": "OWNER/REPO",
+  "allow_ips": [
+    "203.0.113.20"
+  ]
+}

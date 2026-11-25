@@ -1,0 +1,7 @@
+{
+  "name": "one",
+  "title": "ONE",
+  "health": "/healthz",
+  "public": false,
+  "open_paths": ["/api/"]
+}

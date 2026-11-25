@@ -1,0 +1,81 @@
+{{template "head" "People"}}
+<body class="page-conn page-people">
+{{template "topbar" .}}
+<main class="conn people-main">
+  {{with .People}}
+  {{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}
+  {{if .Error}}<p class="notice error" role="alert">{{.Error}}</p>{{end}}
+
+  {{if .Open}}
+  {{with .Open}}
+  <p class="back-link"><a href="/people"><span class="arrow" aria-hidden="true">←</span>All people</a></p>
+  <section class="card person person-open" id="p-{{.ID}}" aria-labelledby="h-person">
+    <div class="p-pic">{{if .Picture}}<img class="avatar" src="{{.Picture}}" alt="">{{else}}<span class="avatar badge {{.Color}}" aria-hidden="true">{{.Badge}}</span>{{end}}</div>
+    <div class="p-body">
+      <h2 id="h-person" class="p-name">{{.Shown}}</h2>
+      <form method="post" action="/people/{{.ID}}" class="pform" id="person-form">
+        {{template "personfields" .}}
+      </form>
+      <div class="p-pics">
+        <form method="post" action="/people/{{.ID}}/picture" enctype="multipart/form-data" class="picform">
+          <label for="pic-{{.ID}}" class="visually-hidden">Picture for {{.Shown}}</label>
+          <input type="file" id="pic-{{.ID}}" name="picture" accept="image/png,image/jpeg,image/webp" required>
+          <button type="submit" class="tertiary">Set picture</button>
+        </form>
+        {{if .Picture}}<form method="post" action="/people/{{.ID}}/picture/remove"><button type="submit" class="tertiary">Remove picture</button></form>{{end}}
+      </div>
+    </div>
+  </section>
+  {{end}}
+  {{else}}
+  {{template "personproposals" .Proposals}}
+
+  <form method="get" action="/people" class="pfilter" role="search">
+    <label for="pq" class="visually-hidden">Find a person</label>
+    <input type="search" id="pq" name="q" value="{{.Filter}}" placeholder="Find a person" maxlength="100" autocomplete="off">
+    <button type="submit" class="secondary">Find</button>
+  </form>
+
+  {{if not .People}}<p class="empty">{{if .Filter}}Nobody matches that.{{else}}No people yet.{{end}}</p>{{end}}
+  <ul class="people-list">
+    {{- range .People}}
+    <li><a class="person-link" href="/people/{{.ID}}">
+      {{if .Picture}}<img class="avatar" src="{{.Picture}}" alt="">{{else}}<span class="avatar badge {{.Color}}" aria-hidden="true">{{.Badge}}</span>{{end}}
+      <span class="pl-name">{{.Shown}}</span>{{if .Protected}}<span class="pl-mark">Always show me</span>{{end}}
+    </a></li>
+    {{- end}}
+  </ul>
+  {{if .People}}<p class="muted pl-count">{{.From}}–{{.To}} of {{.Total}}</p>{{end}}
+  <p class="more-link">{{if .HasPrev}}<a href="/people?offset={{.Prev}}{{if .Filter}}&amp;q={{.Filter}}{{end}}">Previous</a>{{end}}{{if .More}} <a href="/people?offset={{.More}}{{if .Filter}}&amp;q={{.Filter}}{{end}}">Show more</a>{{end}}</p>
+  {{end}}
+  {{end}}
+</main>
+<footer><span class="env">Environment: {{.EnvText}}</span><span>Version: {{.Version}}</span></footer>
+<script src="/static/app.js"></script>
+</body>
+</html>
+{{define "personfields"}}{{$id := printf "f%d" .ID}}
+    <div class="pf-grid">
+      <label for="{{$id}}-name">Name</label>
+      <input type="text" id="{{$id}}-name" name="name" value="{{.Name}}" maxlength="120" required autocomplete="off">
+      <label for="{{$id}}-call">I call them</label>
+      <input type="text" id="{{$id}}-call" name="call_name" value="{{.CallName}}" maxlength="60" autocomplete="off">
+      <label for="{{$id}}-rel">Who they are to me</label>
+      <input type="text" id="{{$id}}-rel" name="relation" value="{{.Relation}}" maxlength="120" autocomplete="off">
+      <label for="{{$id}}-handles">Addresses and handles</label>
+      <textarea id="{{$id}}-handles" name="handles" rows="2" maxlength="4000" spellcheck="false" autocapitalize="off" placeholder="name@example.com&#10;whatsapp: +420600000000">{{.Handles}}</textarea>
+    </div>
+    <label class="check"><input type="checkbox" name="protected" value="1"{{if .Protected}} checked{{end}}> Always show me</label>
+{{end}}
+{{define "personproposals"}}{{$back := .Back}}{{if .List}}
+  <ul class="person-props">
+    {{- range .List}}
+    <li class="prop-chip" role="group" aria-label="Proposal from {{.By}}">
+      <span class="mark mark-proposal">Proposal</span><span class="prop-text">{{.Title}}</span>
+      <form method="post" action="/people-proposals/{{.ID}}/approve" class="prop-act"><input type="hidden" name="back" value="{{$back}}"><button type="submit">Approve</button></form>
+      <form method="post" action="/people-proposals/{{.ID}}/dismiss" class="prop-act"><input type="hidden" name="back" value="{{$back}}"><button type="submit" class="tertiary">Dismiss</button></form>
+      <span class="pp-why">{{.By}}{{if .Reason}}: {{.Reason}}{{end}}</span>
+    </li>
+    {{- end}}
+  </ul>
+{{end}}{{end}}

@@ -1,0 +1,17 @@
+{{define "apps"}}<ul class="apps">
+{{range .}}<li>{{if .Down}}<div class="row down"><span class="name">{{.Title}}</span> <span class="badge">{{.Status}}</span><span class="host">{{.Host}}</span></div>{{else}}<a class="row" href="{{.URL}}"><span class="name">{{.Title}}</span><span class="host">{{.Host}}</span></a>{{end}}</li>
+{{end}}</ul>{{end}}
+{{define "content"}}<h1>{{.T.HomeTitle}}</h1>
+{{with .Notice}}<p class="notice" role="status">{{.}}</p>{{end}}
+<h2>{{.T.Apps}}</h2>
+{{if .Apps}}{{template "apps" .Apps}}{{else}}<p class="hint">{{.T.NoApps}}</p>{{end}}
+{{if .Previews}}<h2>{{.T.Previews}}</h2>
+<p class="hint">{{.T.PreviewsHint}}</p>
+{{range .Previews}}<h3>{{.Name}}</h3>
+{{template "apps" .Apps}}
+{{end}}{{end}}
+<p class="tools"><a href="/_lab/errors">{{.T.ErrorsLink}}</a></p>
+{{if .SignedIn}}<form method="post" action="/_lab/logout">
+<button type="submit" class="secondary">{{.T.SignOut}}</button>
+</form>
+{{end}}{{end}}

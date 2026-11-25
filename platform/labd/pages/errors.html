@@ -1,0 +1,13 @@
+{{define "content"}}<h1>{{.T.ErrorsTitle}}</h1>
+<p class="hint">{{.T.ErrorsHint}}</p>
+{{if not .Errors}}<p class="hint">{{.T.NoApps}}</p>{{end}}
+{{range .Errors}}<details class="errs{{if .Errors}} has-errors{{end}}"{{if .Open}} open{{end}}>
+<summary><span class="name">{{.Title}}</span>{{if not .Prod}} <span class="badge">{{$.T.PreviewWord}}: {{.Env}}</span>{{end}} <span class="badge{{if .Errors}} bad{{end}}">{{.Errors}} {{$.T.ErrorsWord}}</span>
+<span class="host">{{.Host}} · {{.Warnings}} {{$.T.WarningsWord}}, {{.Infos}} {{$.T.InfoWord}}</span></summary>
+{{if .Failed}}<p class="error">{{$.T.JournalFailed}} {{.Failed}}</p>
+{{else if .Lines}}<ul class="log">
+{{range .Lines}}<li><time>{{.When}}</time> <span class="msg">{{.Msg}}</span>{{if .Err}} <span class="err">{{.Err}}</span>{{end}}{{if .RID}} <code>{{.RID}}</code>{{end}}</li>
+{{end}}</ul>
+{{else}}<p class="hint">{{$.T.NoErrors}}</p>{{end}}
+</details>
+{{end}}<p class="back"><a href="/">{{.T.Back}}</a></p>{{end}}

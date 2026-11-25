@@ -1,0 +1,304 @@
+{{template "head" "Settings"}}
+<body class="page-conn page-settings">
+{{template "topbar" .}}
+<main class="conn">
+  <div class="set-links">
+    <p class="card"><a href="/connectors">Connectors</a>: Gmail, Office mail, the chat bridge, calendars and the tokens are set up there.</p>
+    <p class="card"><a href="/people">People</a>: who ONE has seen. Claude keeps them; open one there to correct a mistake.</p>
+  </div>
+  {{with .Settings}}
+  {{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}
+  {{if .Error}}<p class="notice error" role="alert">{{.Error}}</p>{{end}}
+  <form method="post" action="/settings" class="card set-form" id="set-form" aria-labelledby="h-general">
+    <h2 id="h-general">General</h2>
+    <div class="set-grid">
+    {{range .Settings}}{{$cur := .Current}}
+    <div class="set-row">
+      <label for="s-{{.Key}}">{{.Label}}</label>
+      <select id="s-{{.Key}}" name="{{.Key}}"{{if .Hint}} aria-describedby="sh-{{.Key}}"{{end}}>{{range .Options}}<option value="{{.Value}}"{{if eq .Value $cur}} selected{{end}}>{{.Label}}</option>{{end}}</select>
+      {{if .Hint}}<p class="hint" id="sh-{{.Key}}">{{.Hint}}</p>{{end}}
+    </div>
+    {{end}}
+    </div>
+  </form>
+
+  <section class="card rules" id="h-rules" aria-labelledby="h-rules-title">
+    <h2 id="h-rules-title">Import rules</h2>
+    <p class="hint">What is not imported at all. The first rule that is switched on and matches wins. A dropped message keeps one line (who, what about, when) and can be imported again.</p>
+    {{with .Rules}}{{$sources := .Sources}}{{$fields := .Fields}}{{$ops := .Ops}}
+    {{if .Error}}<p class="notice error" role="alert">{{.Error}}</p>{{end}}
+    {{range .Proposals}}
+    <div class="rule rule-proposal" id="rule-{{.ID}}">
+      <p class="r-head"><span class="mark">Proposal</span> <b>{{.Name}}</b></p>
+      {{if ne .Name .Text}}<p class="r-text">{{.Text}}</p>{{end}}
+      <p class="muted">{{.By}}: {{.Reason}}</p>
+      {{if .Numbers}}<p class="muted">{{.Numbers}}</p>{{end}}
+      <div class="acts">
+        <form method="post" action="/settings/rules/{{.ID}}/decision/approve"><button type="submit">Approve</button></form>
+        <form method="post" action="/settings/rules/{{.ID}}/decision/dismiss"><button type="submit" class="secondary">Dismiss</button></form>
+        <form method="post" action="/settings/rules/{{.ID}}/test"><button type="submit" class="tertiary">Test rule</button></form>
+      </div>
+      {{template "ruletest" .Test}}
+    </div>
+    {{end}}
+    <ul class="rule-list">
+      {{- range .Rules}}
+      <li class="rule" id="rule-{{.ID}}">
+        <div class="r-main">
+          <p class="r-head"><b>{{.Name}}</b> <span class="src-status {{if .Enabled}}st-ok{{else}}st-stale{{end}}">{{if .Enabled}}On{{else}}Off{{end}}</span></p>
+          {{if or (ne .Name .Text) (not .Drops)}}<p class="r-text">{{if ne .Name .Text}}{{.Text}}{{end}}{{if and (ne .Name .Text) (not .Drops)}} · {{end}}{{if not .Drops}}Dropped ({{.Dropped}}){{end}}</p>{{end}}
+        </div>
+        <div class="acts r-acts">
+          <form method="post" action="/settings/rules/{{.ID}}/enabled/{{if .Enabled}}off{{else}}on{{end}}"><button type="submit" class="tertiary" role="switch" aria-checked="{{if .Enabled}}true{{else}}false{{end}}" aria-label="Enabled: {{.Name}}">Enabled: {{if .Enabled}}on{{else}}off{{end}}</button></form>
+          <form method="post" action="/settings/rules/{{.ID}}/test"><button type="submit" class="tertiary">Test rule</button></form>
+        </div>
+        {{if .Drops}}
+        <details class="r-drops">
+          <summary>Dropped ({{.Dropped}})</summary>
+          <ul class="drops">
+            {{- range .Drops}}
+            <li><span class="d-who">{{.Sender}}</span> <span class="d-subj">{{.Subject}}</span> <time datetime="{{.ISO}}" title="{{.WhenFull}}">{{.When}}</time> <span class="muted">{{.Rule}}</span>
+              {{if .Reimported}}<span class="muted">Imported again</span>{{else}}<form method="post" action="/settings/skipped/{{.ID}}/again" class="inline"><button type="submit" class="tertiary">Import again</button></form>{{end}}</li>
+            {{- end}}
+          </ul>
+          {{if .MoreDrops}}<p class="muted">Only the newest {{len .Drops}} are listed.</p>{{end}}
+        </details>
+        {{end}}
+        {{if .Editable}}
+        <details class="r-edit">
+          <summary>Edit</summary>
+          <form method="post" action="/settings/rules/{{.ID}}" class="ic-form rule-fields" autocomplete="off">
+            <div class="fld fld-wide"><label for="rn-{{.ID}}">Name</label>
+            <input type="text" id="rn-{{.ID}}" name="name" value="{{.Name}}" maxlength="100"></div>
+            {{template "ruleparts" dict2 . $sources $fields $ops}}
+            <button type="submit" class="secondary">Save</button>
+          </form>
+        </details>
+        {{end}}
+        {{template "ruletest" .Test}}
+      </li>
+      {{- end}}
+    </ul>
+    <form method="post" action="/settings/rules" class="ic-form rule-fields rule-add" aria-labelledby="h-addrule" autocomplete="off">
+      <h3 class="sub" id="h-addrule">New rule</h3>
+      <div class="fld fld-wide"><label for="rn-new">Name</label>
+      <input type="text" id="rn-new" name="name" value="{{.Form.Name}}" maxlength="100" placeholder="Optional"></div>
+      {{template "ruleparts" dict2 .Form $sources $fields $ops}}
+      <div class="acts">
+        <button type="submit">Add rule</button>
+        <button type="submit" class="secondary" formaction="/settings/rules/test">Test rule</button>
+      </div>
+    </form>
+    {{template "ruletest" .Test}}
+    {{end}}
+  </section>
+
+  <section class="card rules" id="h-skiprules" aria-labelledby="h-skiprules-title">
+    <h2 id="h-skiprules-title">Skip rules</h2>
+    <p class="hint">What is closed without asking Claude. A closed item stays in Closed and can be brought back; a rule whose item is brought back pauses at once.</p>
+    {{with .Skip}}
+    {{range .Proposals}}
+    <div class="rule rule-proposal" id="skiprule-{{.ID}}">
+      <p class="r-head"><span class="mark">Proposal</span> <b>{{.Name}}</b></p>
+      <p class="r-text">{{.What}}</p>
+      {{if .Reason}}<p class="muted">{{.By}}: {{.Reason}}</p>{{end}}
+      {{if .Numbers}}<p class="muted">{{.Numbers}}</p>{{end}}
+      <div class="acts">
+        <form method="post" action="/settings/skip-rules/{{.ID}}/decision/approve"><button type="submit">Approve</button></form>
+        <form method="post" action="/settings/skip-rules/{{.ID}}/decision/dismiss"><button type="submit" class="secondary">Dismiss</button></form>
+      </div>
+    </div>
+    {{end}}
+    {{if .Rules}}<ul class="rule-list">
+      {{- range .Rules}}
+      <li class="rule" id="skiprule-{{.ID}}">
+        <div class="r-main">
+          <p class="r-head"><b>{{.Name}}</b> {{if .Paused}}<span class="src-status st-error">Paused</span>{{else}}<span class="src-status {{if .Enabled}}st-ok{{else}}st-stale{{end}}">{{if .Enabled}}On{{else}}Off{{end}}</span>{{end}}</p>
+          <p class="r-text">{{.What}}</p>
+          {{if .Paused}}<p class="muted">{{.PausedWhy}}</p>{{end}}
+          <p class="muted">Closed ({{.Closed}})</p>
+        </div>
+        <div class="acts r-acts">
+          <form method="post" action="/settings/skip-rules/{{.ID}}/enabled/{{if .Enabled}}off{{else}}on{{end}}"><button type="submit" class="tertiary" role="switch" aria-checked="{{if .Enabled}}true{{else}}false{{end}}" aria-label="Enabled: {{.Name}}">Enabled: {{if .Enabled}}on{{else}}off{{end}}</button></form>
+        </div>
+      </li>
+      {{- end}}
+    </ul>{{end}}
+    {{if and (not .Proposals) (not .Rules)}}<p class="muted">No skip rules yet.</p>{{end}}
+    {{end}}
+  </section>
+
+  <section class="card" id="h-matter" aria-labelledby="h-matter-title">
+    <h2 id="h-matter-title">Matter patterns</h2>
+    <p class="hint">Mail about the same matter joins one row, even when it arrives as separate mails. A pattern finds the reference (an order, parcel, invoice or file number) in the subject or the text; the same reference joins. Similar sender or subject alone never joins rows.</p>
+    {{if .Matter.Proposals}}<ul class="rule-list">
+      {{- range .Matter.Proposals}}
+      <li class="rule proposal">
+        <div class="r-main">
+          <p class="r-head"><span class="mark">Proposal</span> <b>{{.Name}}</b></p>
+          <p class="r-text"><code>{{.Re}}</code></p>
+          <p class="muted">{{.By}}{{if .Reason}}: {{.Reason}}{{end}}</p>
+          {{if .Joins}}<p class="muted">{{.Joins}}</p>{{end}}
+        </div>
+        <div class="acts r-acts">
+          <form method="post" action="/settings/matter-proposals/{{.ID}}/decision/approve"><button type="submit">Approve</button></form>
+          <form method="post" action="/settings/matter-proposals/{{.ID}}/decision/dismiss"><button type="submit" class="tertiary">Dismiss</button></form>
+        </div>
+      </li>
+      {{- end}}
+    </ul>{{end}}
+    {{if .Matter.Patterns}}<ul class="rule-list">
+      {{- range .Matter.Patterns}}
+      <li class="rule">
+        <div class="r-main">
+          <p class="r-head"><b>{{.Name}}</b></p>
+          <p class="r-text"><code>{{.Re}}</code></p>
+        </div>
+        <div class="acts r-acts">
+          <form method="post" action="/settings/matter-patterns/{{.N}}/remove" data-confirm="Remove this pattern? Rows already joined stay joined."><button type="submit" class="tertiary" aria-label="Remove pattern: {{.Name}}">Remove</button></form>
+        </div>
+      </li>
+      {{- end}}
+    </ul>{{else}}{{if not .Matter.Proposals}}<p class="muted">No patterns yet.</p>{{end}}{{end}}
+    <form method="post" action="/settings/matter-patterns" class="ic-form rule-fields rule-add" autocomplete="off">
+      <h3 class="sub">New pattern</h3>
+      <div class="fld fld-wide"><label for="mp-name">Name</label>
+      <input type="text" id="mp-name" name="name" maxlength="60" placeholder="Optional"></div>
+      <div class="fld fld-wide"><label for="mp-re">Pattern</label>
+      <input type="text" id="mp-re" name="pattern" maxlength="200" spellcheck="false" required placeholder="INV-[0-9]+" aria-describedby="mp-hint"></div>
+      <div class="acts"><button type="submit">Add pattern</button></div>
+    </form>
+    <p class="hint" id="mp-hint">The pattern is a regular expression. If it has a group in brackets, the group is the reference; otherwise the whole match. Capital letters do not matter.</p>
+  </section>
+
+  <section class="card" id="h-claude" aria-labelledby="h-claude-title">
+    <h2 id="h-claude-title">Claude</h2>
+    {{with $c := .Claude}}
+    <form method="post" action="/settings/claude" class="set-form" autocomplete="off">
+      <div class="set-grid">
+      {{range .Fields}}
+      <div class="set-row">
+        <label for="c-{{.Key}}">{{.Label}}</label>
+        {{if eq .Kind "money"}}<span class="unit-field"><span class="unit" aria-hidden="true">$</span><input id="c-{{.Key}}" name="{{.Key}}" value="{{.Value}}" type="text" inputmode="decimal" aria-describedby="ch-{{.Key}}"></span>
+        {{else}}<input id="c-{{.Key}}" name="{{.Key}}" value="{{.Value}}" {{if eq .Kind "number"}}type="text" inputmode="numeric"{{else if eq .Kind "time"}}type="text" inputmode="numeric" placeholder="03:00" maxlength="5"{{else}}type="text" spellcheck="false"{{if .Datalist}} list="c-models"{{end}}{{end}} aria-describedby="ch-{{.Key}}">{{end}}
+        {{if .Datalist}}{{$k := .Key}}<p class="model-pick" role="group" aria-label="Known models">{{range $c.Models}}<button type="button" class="tertiary js-model" data-for="c-{{$k}}" data-model="{{.}}">{{.}}</button>{{end}}</p>{{end}}
+        <p class="hint" id="ch-{{.Key}}">{{.Hint}}</p>
+      </div>
+      {{end}}
+      </div>
+      <datalist id="c-models">{{range .Models}}<option value="{{.}}">{{end}}</datalist>
+      <button type="submit" class="secondary">Save</button>
+    </form>
+    <form method="post" action="/settings/prices" class="set-form" autocomplete="off">
+      <h3 class="sub">Prices</h3>
+      <p class="hint">US dollars per million tokens. {{if .Confirmed}}Checked and saved by you.{{else}}{{.Source}}{{end}}</p>
+      <div class="price-head" aria-hidden="true"><span>Model</span><span>Input</span><span>Output</span></div>
+      {{range .Prices}}
+      <div class="price-row">
+        <input type="text" name="model" value="{{.Model}}" maxlength="80" aria-label="Model" spellcheck="false">
+        <input type="text" name="in" value="{{.In}}" inputmode="decimal" aria-label="Input price for {{.Model}}">
+        <input type="text" name="out" value="{{.Out}}" inputmode="decimal" aria-label="Output price for {{.Model}}">
+      </div>
+      {{end}}
+      <button type="submit" class="secondary">Save prices</button>
+    </form>
+    {{end}}
+  </section>
+
+  <section class="card" aria-labelledby="h-guards">
+    <h2 id="h-guards">Guards</h2>
+    <p class="hint">The checks ONE makes before it accepts an action. Refused recently counts the last 7 days.</p>
+    <ul class="guards">
+      {{- range .Guards}}
+      <li class="guard">
+        <p class="g-title"><b>{{.Name}}</b> <span class="src-status {{if eq .State "Off"}}st-error{{else}}st-ok{{end}}">{{.State}}</span></p>
+        <p class="hint g-why">{{.Why}}</p>
+        <p class="muted g-refused">Refused recently: {{.Refused}}</p>
+        {{if .Blocked}}<form method="post" action="/settings/blocked-targets" class="g-list">
+          <label for="blocked-list">Senders and domains (one on each line; a domain includes its subdomains)</label>
+          <textarea id="blocked-list" name="list" rows="6" spellcheck="false">
+{{.BlockedList}}</textarea>
+          <button type="submit" class="secondary">Save list</button>
+        </form>{{end}}
+        <div class="g-switch">{{if .Switchable}}<form method="post" action="/settings/guards/{{.Key}}/{{if .IsOn}}off{{else}}on{{end}}"{{if .IsOn}} data-confirm="Switch off {{.Name}}? ONE will stop making this check."{{end}}><button type="submit" class="tertiary">{{if .IsOn}}Switch off{{else}}Switch on{{end}}</button></form>{{end}}</div>
+      </li>
+      {{- end}}
+    </ul>
+  </section>
+
+  {{if .History.Show}}
+  <section class="card" id="h-history" aria-labelledby="h-history-title">
+    <h2 id="h-history-title">History review</h2>
+    <p class="r-text">{{.History.Line}}</p>
+  </section>
+  {{end}}
+
+  <section class="card" aria-labelledby="h-proposals">
+    <h2 id="h-proposals">Proposals from Claude</h2>
+    {{if or .Waiting .People.List .Rules.Proposals .Skip.Proposals .Matter.Proposals .Changes}}
+    <p class="hint">These wait for your Approve. Open the item to approve or dismiss; proposals about people can be decided here.</p>
+    {{if .Rules.Proposals}}<p><a href="#h-rules">{{len .Rules.Proposals}} proposed {{if eq (len .Rules.Proposals) 1}}rule waits{{else}}rules wait{{end}} under Import rules.</a></p>{{end}}
+    {{if .Skip.Proposals}}<p><a href="#h-skiprules">{{len .Skip.Proposals}} proposed skip {{if eq (len .Skip.Proposals) 1}}rule waits{{else}}rules wait{{end}} under Skip rules.</a></p>{{end}}
+    {{if .Matter.Proposals}}<p><a href="#h-matter">{{len .Matter.Proposals}} proposed {{if eq (len .Matter.Proposals) 1}}pattern waits{{else}}patterns wait{{end}} under Matter patterns.</a></p>{{end}}
+    {{if .Changes}}<ul class="setting-props">
+      {{- range .Changes}}
+      <li class="sp">
+        <div class="sp-main">
+          <p class="sp-what"><b>{{.Label}}</b> from <b>{{.FromText}}</b> to <b>{{.ToText}}</b></p>
+          <p class="muted sp-why">{{.By}}{{if .Reason}}: {{.Reason}}{{end}}</p>
+        </div>
+        <div class="sp-acts">
+          <form method="post" action="/settings/setting-proposals/{{.ID}}/approve"><button type="submit">Approve</button></form>
+          <form method="post" action="/settings/setting-proposals/{{.ID}}/dismiss"><button type="submit" class="tertiary">Dismiss</button></form>
+        </div>
+      </li>
+      {{- end}}
+    </ul>{{end}}
+    {{if .Waiting}}<ul class="waiting">
+      {{- range .Waiting}}
+      <li><a href="/items/{{.ItemID}}"><b>{{.Number}}</b> {{.Text}}</a><p class="muted">{{.By}}{{if .Reason}}: {{.Reason}}{{end}}</p></li>
+      {{- end}}
+    </ul>{{end}}
+    {{template "personproposals" .People}}
+    {{else}}<p class="muted">Nothing waits for Approve.</p>{{end}}
+  </section>
+
+  {{if .TestRuns}}
+  <section class="card" id="h-testdata" aria-labelledby="h-testdata-title">
+    <h2 id="h-testdata-title">Test data</h2>
+    <p class="hint">Left behind by automated tests. It is not real mail, chats, people or notes. Remove takes away all of one run and nothing else.</p>
+    <ul class="testruns">
+      {{- range .TestRuns}}
+      <li>
+        <div class="t-main">
+          <p class="t-run">{{.Run}}</p>
+          <p class="muted t-what">{{if .Lines}}{{range $i, $l := .Lines}}{{if $i}}, {{end}}{{$l}}{{end}}{{else}}{{.Total}} records{{end}}{{if .Since}} · since {{.Since}}{{end}}</p>
+        </div>
+        <form method="post" action="/settings/test-data/{{.Run}}/remove" data-confirm="Remove all of this test data? It cannot be brought back."><button type="submit" class="secondary">Remove</button></form>
+      </li>
+      {{- end}}
+    </ul>
+  </section>
+  {{end}}
+  {{end}}
+</main>
+<footer><span class="env">Environment: {{.EnvText}}</span><span>Version: {{.Version}}</span></footer>
+<script src="/static/app.js"></script>
+</body>
+</html>
+{{define "ruleparts"}}{{$f := index . 0}}{{$sources := index . 1}}{{$fields := index . 2}}{{$ops := index . 3}}
+            <div class="fld"><label for="rs-{{$f.ID}}">Mailbox</label>
+            <select id="rs-{{$f.ID}}" name="source">{{range $sources}}<option value="{{.Value}}"{{if eq .Value $f.Source}} selected{{end}}>{{.Label}}</option>{{end}}</select></div>
+            <div class="fld"><label for="rf-{{$f.ID}}">Looks at</label>
+            <select id="rf-{{$f.ID}}" name="field">{{range $fields}}<option value="{{.Value}}"{{if eq .Value $f.Field}} selected{{end}}>{{.Label}}</option>{{end}}</select></div>
+            <div class="fld"><label for="ro-{{$f.ID}}">Compares</label>
+            <select id="ro-{{$f.ID}}" name="op">{{range $ops}}<option value="{{.Value}}"{{if eq .Value $f.Op}} selected{{end}}>{{.Label}}</option>{{end}}</select></div>
+            <div class="fld fld-wide"><label for="rv-{{$f.ID}}">Value</label>
+            <input type="text" id="rv-{{$f.ID}}" name="value" value="{{$f.Value}}" maxlength="200" spellcheck="false" autocapitalize="off"></div>{{end}}
+{{define "ruletest"}}{{with .}}<div class="rule-test" role="status">
+  <p><b>{{.Title}}</b></p>
+  {{if .Note}}<p class="muted">{{.Note}}</p>{{else}}
+  <p>{{if .Count}}In the last 30 days it would have dropped {{plural .Count "message"}}.{{else}}In the last 30 days it would have dropped nothing.{{end}}</p>
+  {{if .Lines}}<ul class="drops">{{range .Lines}}<li><span class="d-who">{{.Sender}}</span> <span class="d-subj">{{.Subject}}</span> <time datetime="{{.ISO}}" title="{{.WhenFull}}">{{.When}}</time></li>{{end}}</ul>{{end}}
+  {{if .More}}<p class="muted">and {{.More}} more.</p>{{end}}{{end}}
+</div>{{end}}{{end}}

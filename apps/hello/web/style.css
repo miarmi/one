@@ -1,0 +1,75 @@
+:root {
+  --bg: #f6f4ef;
+  --card: #ffffff;
+  --text: #1f2a24;
+  --muted: #5d6b63;
+  --accent: #2f6f4f;
+  --accent-text: #ffffff;
+  --border: #d9d4c7;
+  --danger: #a33b2b;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #141815;
+    --card: #1d231f;
+    --text: #e8ece9;
+    --muted: #9aa8a0;
+    --accent: #5fae86;
+    --accent-text: #0e1410;
+    --border: #2e3832;
+    --danger: #e58a7a;
+  }
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 17px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+main { max-width: 40rem; margin: 0 auto; padding: 1.25rem 1rem 2rem; }
+header h1 { margin: 0; font-size: 2rem; letter-spacing: -0.02em; }
+.env { margin: 0.25rem 0 1.25rem; color: var(--muted); font-size: 0.95rem; }
+.add label { display: block; font-weight: 600; margin-bottom: 0.35rem; }
+.row { display: flex; gap: 0.5rem; }
+.row input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 0.6rem;
+  background: var(--card);
+  color: var(--text);
+}
+.row input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+button {
+  font: inherit;
+  font-weight: 600;
+  min-height: 2.75rem;
+  padding: 0.6rem 1rem;
+  border: 0;
+  border-radius: 0.6rem;
+  background: var(--accent);
+  color: var(--accent-text);
+  cursor: pointer;
+}
+.message { color: var(--danger); margin: 0.5rem 0 0; font-weight: 600; }
+.notes { list-style: none; padding: 0; margin: 1.5rem 0 0; display: grid; gap: 0.6rem; }
+.notes li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  padding: 0.75rem 0.75rem 0.75rem 1rem;
+}
+.notes .text { flex: 1; min-width: 0; margin: 0.35rem 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.notes form { margin: 0; }
+button.delete { background: transparent; color: var(--danger); border: 1px solid var(--border); padding: 0.5rem 0.8rem; }
+.empty { color: var(--muted); margin-top: 1.5rem; }
+footer { max-width: 40rem; margin: 0 auto; padding: 0 1rem 1.5rem; color: var(--muted); font-size: 0.85rem; }

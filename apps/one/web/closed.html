@@ -1,0 +1,34 @@
+{{template "head" "Closed"}}
+<body class="page-conn page-closed">
+{{template "topbar" .}}
+<main class="conn">
+  {{with .Closed}}
+  {{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}
+  {{if not .Sections}}<p class="empty">Nothing is closed.</p>{{end}}
+  {{range .Sections}}
+  <section class="card closed-sec" id="sec-{{.Key}}" aria-labelledby="h-closed-{{.Name}}">
+    <h2 id="h-closed-{{.Name}}">{{.Name}}</h2>
+    {{if .Unseen}}<form method="post" action="/closed/seen-all" class="c-seen-all"><button type="submit" class="secondary">Mark all seen</button></form>{{end}}
+    <ul class="closed-list">
+      {{- range .Entries}}
+      <li class="closed-entry" id="closed-{{.ID}}">
+        <div class="c-main">
+          <p class="c-subject"><a href="/items/{{.ID}}">{{.Subject}}</a> <span class="c-meta"><span class="c-num">{{.Number}}</span> · {{.Who}} · <time datetime="{{.ISO}}" title="{{.WhenFull}}">{{.When}}</time></span></p>
+          {{if .Unseen}}<p class="c-unseen"><span class="mark mark-notseen">Not seen</span></p>{{end}}
+          <p class="c-by">Closed by {{.By}}</p>
+          {{if .Kind}}<p class="c-kind">Kind: {{.Kind}}</p>{{end}}
+          <p class="c-reason">Reason: {{.Reason}}</p>
+        </div>
+        <div class="c-acts">{{if .Unseen}}<form method="post" action="{{.SeenPath}}" class="c-act"><button type="submit" class="secondary">Seen</button></form>{{end}}<form method="post" action="{{.BackPath}}" class="c-act"><button type="submit" class="tertiary">Bring back</button></form></div>
+      </li>
+      {{- end}}
+    </ul>
+    {{if .MoreURL}}<p class="more-link"><a href="{{.MoreURL}}">Show more</a></p>{{end}}
+  </section>
+  {{end}}
+  {{end}}
+</main>
+<footer><span class="env">Environment: {{.EnvText}}</span><span>Version: {{.Version}}</span></footer>
+<script src="/static/app.js"></script>
+</body>
+</html>

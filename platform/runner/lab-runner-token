@@ -1,0 +1,5 @@
+#!/bin/bash
+# Store the GitHub token the test server needs to take jobs (see manager.py).
+# Run as root in the Hetzner web console: lab-runner-token
+# It says exactly what is wrong with a token before keeping it.
+exec /usr/bin/python3 /usr/local/lib/lab-runner/manager.py --set-token /etc/lab-runner/config.json

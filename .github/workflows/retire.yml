@@ -1,0 +1,73 @@
+name: retire
+# Retire an app for good: remove its production instance (unit, routes,
+# certificate, releases and all data, secrets included) and any previews of
+# it. Only after the app's folder is gone from main, so code goes first and
+# data last; and only when the owner starts it by hand and types the name twice.
+
+on:
+  workflow_dispatch:
+    inputs:
+      app:
+        description: App to retire (its apps/<app> folder must already be gone from main)
+        type: string
+        required: true
+      confirm:
+        description: Type the app name again to confirm — this deletes its production data
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  retire:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ${{ vars.LAB_RUNNER || 'lab-runner' }}
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - name: Remove the production instance and its previews
+        env:
+          APP: ${{ inputs.app }}
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          . platform/scripts/gh-lib.sh
+          if [[ ! "$APP" =~ ^[a-z][a-z0-9]{1,19}$ ]]; then
+            echo "::error::'$APP' is not an app name"
+            exit 1
+          fi
+          if [[ "$CONFIRM" != "$APP" ]]; then
+            echo "::error::The confirmation does not match the app name; nothing was removed"
+            exit 1
+          fi
+          if [[ -d "apps/$APP" ]]; then
+            echo "::error::apps/$APP still exists on main. Remove the app from main first (a pull request), then retire it."
+            exit 1
+          fi
+          if [[ -z "$(jq -r '.server_ip // ""' lab.json)" ]]; then
+            echo "::error::lab.json has no server; nothing to retire"
+            exit 1
+          fi
+          status="$(platform/scripts/lab-api.sh GET /api/status)"
+          removed=()
+          for env in $(jq -r --arg app "$APP" '.instances[] | select(.app == $app) | .env' <<<"$status"); do
+            if [[ "$env" == prod ]]; then
+              platform/scripts/lab-api.sh DELETE "/api/instances?app=$APP&env=prod&retire=$APP" >/dev/null
+            else
+              LAB_API_ALLOW_404=1 platform/scripts/lab-api.sh DELETE "/api/instances?app=$APP&env=$env" >/dev/null
+            fi
+            removed+=("$env")
+          done
+          if ((${#removed[@]})); then
+            gh_annotate notice "Retired $APP" "Removed instances: ${removed[*]}. Its data is gone."
+            gh_summary "Retired **$APP**: removed ${removed[*]}. Unit, routes, certificate, releases and all data (secrets included) are gone."
+          else
+            gh_annotate notice "Nothing to retire" "$APP has no instances on the server"
+            gh_summary "**$APP** had no instances on the server; nothing changed."
+          fi

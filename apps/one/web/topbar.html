@@ -1,0 +1,64 @@
+{{define "ic-attach"}}<svg class="ic" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 7.5l-4.8 4.8a3 3 0 0 1-4.2-4.2l5-5a2 2 0 0 1 2.8 2.8l-5 5a1 1 0 0 1-1.4-1.4l4.6-4.6"/></svg>{{end}}
+{{define "ic-send"}}<svg class="ic" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2L7 9"/><path d="M14 2l-4.5 12-2.5-5-5-2.5z"/></svg>{{end}}
+{{define "ic-act"}}{{if eq . "Mark pending"}}{{template "ic-pending"}}{{else if eq . "Resolve"}}{{template "ic-resolve"}}{{else if eq . "Reopen"}}{{template "ic-reopen"}}{{else}}{{template "ic-todo"}}{{end}}{{end}}
+{{define "ic-open"}}<svg class="ic" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 4.5h11v8h-11z"/><path d="M2.5 5l5.5 4 5.5-4"/></svg>{{end}}
+{{define "ic-reply"}}<svg class="ic" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 4L2.5 8l4 4"/><path d="M2.5 8h6.5a4 4 0 0 1 4 4"/></svg>{{end}}
+{{define "ic-pending"}}<svg class="ic" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="5.5"/><path d="M8 5v3l2 1.5"/></svg>{{end}}
+{{define "ic-resolve"}}<svg class="ic" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="5.5"/><path d="M5.5 8.2l1.8 1.8 3.2-3.6"/></svg>{{end}}
+{{define "ic-reopen"}}<svg class="ic" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 3.5L3 6l2.5 2.5"/><path d="M3 6h5.5a3.5 3.5 0 0 1 0 7H6"/></svg>{{end}}
+{{define "ic-todo"}}<svg class="ic" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="2.5" width="11" height="11" rx="2"/><path d="M8 5.5v5M5.5 8h5"/></svg>{{end}}
+{{define "ic-notes"}}<svg class="ic" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 2.5h6l2.5 2.5v8.5H4z"/><path d="M6 8h4.5M6 10.5h4.5"/></svg>{{end}}
+{{define "ic-people"}}<svg class="ic" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.2"/><path d="M2 13c.4-2.2 2-3.4 4-3.4s3.6 1.2 4 3.4"/><path d="M10.5 4a2.2 2.2 0 0 1 0 4.2M11.8 9.9c1.2.5 2 1.6 2.2 3.1"/></svg>{{end}}
+{{define "ic-connectors"}}<svg class="ic" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2.5v3M10 2.5v3"/><path d="M4.5 5.5h7v2.5a3.5 3.5 0 0 1-7 0z"/><path d="M8 11.5v2"/></svg>{{end}}
+{{define "ic-settings"}}<svg class="ic" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="2"/><path d="M8 2.5v1.5M8 12v1.5M2.5 8H4M12 8h1.5M4.1 4.1l1.1 1.1M10.8 10.8l1.1 1.1M4.1 11.9l1.1-1.1M10.8 5.2l1.1-1.1"/></svg>{{end}}
+{{define "ic-refresh"}}<svg class="ic" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9"/><path d="M13.5 2.5v3h-3"/></svg>{{end}}
+{{define "topbar"}}<header class="top{{if .Top.Sub}} top-sub{{end}}" id="top">
+  <div class="top-bar">
+    <div class="brand">
+      <div class="brand-line">
+        <h1><a href="/">ONE</a></h1>
+        <div class="dot-wrap">
+          <a class="dot {{.Dot.Cls}}" href="/connectors" aria-describedby="dot-pop" title="{{.Dot.Label}}"><span class="dot-mark" aria-hidden="true"></span><span class="dot-label">{{.Dot.Label}}</span></a>
+          <ul class="dot-pop" id="dot-pop" role="tooltip">{{range .Dot.Lines}}<li><span>{{.Name}}</span><span class="src-status {{.Cls}}">{{.State}}</span></li>{{else}}<li>No connections yet.</li>{{end}}</ul>
+        </div>
+      </div>
+    </div>
+    <span class="rb-sep rb-sep-1" aria-hidden="true"></span>
+    {{if not .Top.Sub}}<div class="ribbon-tools" id="ribbon-tools" role="toolbar" aria-label="Selected item">
+      <button type="button" class="rb" data-act="open" aria-disabled="true">{{template "ic-open"}}<span>Open</span></button>
+      <button type="button" class="rb" data-act="reply" aria-disabled="true">{{template "ic-reply"}}<span>Reply</span></button>
+      <button type="button" class="rb" data-act="pending" aria-disabled="true">{{template "ic-pending"}}<span>Pending</span></button>
+      <button type="button" class="rb" data-act="resolve" aria-disabled="true">{{template "ic-resolve"}}<span>Resolve</span></button>
+      <button type="button" class="rb" data-act="reopen" aria-disabled="true" hidden>{{template "ic-reopen"}}<span>Reopen</span></button>
+      <button type="button" class="rb" data-act="todo" aria-disabled="true">{{template "ic-todo"}}<span>To do</span></button>
+    </div>{{end}}
+    {{if .Top.Sub}}<div class="top-status">
+      <div class="top-line"><h2 class="heading page-title" id="page-title">{{.Top.Title}}</h2></div>
+      <div class="top-strips" id="strips"><div class="top-alerts" id="alerts">{{range .Alerts}}<p class="strip strip-alert" role="status"><a href="/connectors">{{.}}</a></p>{{end}}</div><a class="strip-more" id="strip-more" href="/connectors" hidden></a></div>
+    </div>{{else}}<div class="top-status">
+      <div class="top-line"><h2 class="heading" id="heading" role="status">{{.List.Heading}}</h2>
+      <a class="todo-link" id="todo-link" href="#ag-todo-h"{{if not .List.Todos}} hidden{{end}}>{{if .List.Todos}}{{.List.Todos}} to do{{end}}</a></div>
+      <div class="top-strips" id="strips"><div class="top-alerts" id="alerts">{{range .Alerts}}<p class="strip strip-alert" role="status"><a href="/connectors">{{.}}</a></p>{{end}}</div>
+      <p class="strip" id="people-strip" role="status"{{if not .List.Proposals}} hidden{{end}}>{{if .List.Proposals}}<a href="/settings#h-proposals">{{.List.Proposals}}</a>{{end}}</p>
+      <div class="strip" id="night-strip" role="status"{{if not .List.Night}} hidden{{end}}><a id="night-text" href="/connectors#claude">{{.List.Night}}</a><form method="post" action="/night/dismiss"><button type="submit" class="strip-x">Dismiss</button></form></div>
+      <p class="strip" id="claude-strip" role="status"{{if not .List.Waiting}} hidden{{end}}>{{.List.Waiting}}</p>
+      <a class="strip-more" id="strip-more" href="/connectors" hidden></a></div>
+    </div>{{end}}
+    <div class="top-right">
+      {{if .Top.Sub}}<a class="top-back" href="/"><span class="arrow" aria-hidden="true">←</span>Back to the queue</a>{{end}}
+      <span class="rb-sep rb-sep-2" aria-hidden="true"></span>
+      <nav class="top-nav" aria-label="Pages"><a href="/notes" title="Notes"{{if eq .Top.Title "Notes"}} aria-current="page"{{end}}>{{template "ic-notes"}}<span>Notes</span></a><a href="/people" class="nav-people" title="People"{{if eq .Top.Title "People"}} aria-current="page"{{end}}>{{template "ic-people"}}<span>People</span></a><a href="/connectors" title="Connectors"{{if eq .Top.Title "Connectors"}} aria-current="page"{{end}}>{{template "ic-connectors"}}<span>Connectors</span></a><a href="/settings" title="Settings"{{if eq .Top.Title "Settings"}} aria-current="page"{{end}}>{{template "ic-settings"}}<span>Settings</span></a></nav>
+      <span class="rb-sep rb-sep-3" aria-hidden="true"></span>
+      <button type="button" class="top-refresh js-refresh" id="refresh" data-state="idle" title="Refresh">{{template "ic-refresh"}}<span class="rb-label">Refresh</span></button>
+      <form class="search" action="/search" method="get" role="search">
+        <label for="q" class="visually-hidden">Search</label>
+        <svg class="search-icon" viewBox="0 0 20 20" width="18" height="18" aria-hidden="true" focusable="false"><circle cx="8.5" cy="8.5" r="5.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M13 13l5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        <input type="search" id="q" name="q" placeholder="Search mail, chats, events and notes" maxlength="200" autocomplete="off" enterkeyhint="search" role="combobox" aria-controls="live" aria-autocomplete="list">
+        <div class="live" id="live" role="listbox" aria-label="Search results" hidden></div>
+      </form>
+      {{if .ShowAgenda}}<button type="button" class="tertiary js-agenda-toggle ag-toggle" aria-controls="agenda" hidden>Agenda</button>{{end}}
+      {{with .Top.Primary}}{{if .Href}}<a class="btn top-primary" href="{{.Href}}">{{.Label}}</a>{{else}}<button type="submit" class="top-primary" form="{{.Form}}">{{.Label}}</button>{{end}}{{end}}
+    </div>
+  </div>
+  <div class="refresh-note" id="refresh-note" role="status" aria-live="polite" hidden></div>
+</header>{{end}}

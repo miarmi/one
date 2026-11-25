@@ -1,0 +1,28 @@
+{{template "head" "Notes"}}
+<body class="page-conn page-notes">
+{{template "topbar" .}}
+<main class="conn">
+  {{with .Notes}}
+  {{if .Error}}<p class="notice error" role="alert">{{.Error}}</p>{{end}}
+  <form method="post" action="{{if .Editing}}/notes/{{.Note.ID}}{{else}}/notes{{end}}" class="card note-form" id="note-form">
+    <h2>{{if .Editing}}Change note{{else}}New note{{end}}</h2>
+    <p class="hint">What you have explained once: a preference, a fact about a person, a decision, a way something is done. Agents can find it and use it.</p>
+    <label for="n-title">Title</label>
+    <input type="text" id="n-title" name="title" value="{{.Note.Title}}" maxlength="200" required autocomplete="off">
+    <label for="n-body">Note</label>
+    <textarea id="n-body" name="body" rows="8" maxlength="8000" required>{{.Note.Body}}</textarea>
+    <label for="n-item">About an item (optional, like Q-0012)</label>
+    <input type="text" id="n-item" name="item" value="{{.Note.ItemField}}" maxlength="20" autocomplete="off" spellcheck="false" list="n-items">
+    <datalist id="n-items">{{range .ItemChoices}}<option value="{{.Value}}" label="{{.Label}}">{{end}}</datalist>
+    <label for="n-person">About a person (optional, as named on People)</label>
+    <input type="text" id="n-person" name="person" value="{{.Note.PersonField}}" maxlength="120" autocomplete="off" list="n-people">
+    <datalist id="n-people">{{range .PersonChoices}}<option value="{{.}}">{{end}}</datalist>
+    <label for="n-sender">About a sender (optional: an address like name@example.com, or a domain like example.com)</label>
+    <input type="text" id="n-sender" name="sender" value="{{.Note.SenderField}}" maxlength="200" autocomplete="off" spellcheck="false">
+  </form>
+  {{end}}
+</main>
+<footer><span class="env">Environment: {{.EnvText}}</span><span>Version: {{.Version}}</span></footer>
+<script src="/static/app.js"></script>
+</body>
+</html>

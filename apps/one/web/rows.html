@@ -1,0 +1,152 @@
+{{define "group"}}{{if .Rows}}{{range .Rows}}{{template "row" .}}{{end}}{{if .More}}<li class="more-row" data-next="{{.Next}}"><button type="button" class="tertiary js-more">Show more</button></li>{{end}}{{else if .First}}<li class="empty-row">Nothing in {{.Name}}.</li>{{end}}{{end}}
+
+{{define "actions"}}{{range .Actions}}<form method="post" action="{{.Path}}" class="state-act" data-ajax="row">{{if $.Open}}<input type="hidden" name="open" value="1">{{end}}<button type="submit" class="tertiary">{{.Label}}</button></form>{{end}}{{end}}
+
+{{define "row"}}<li class="row{{if .Open}} open{{end}}{{if and .Prop (not .Open)}} has-prop{{end}}{{if .Pending}} has-wait{{end}}" id="item-{{.ID}}" data-id="{{.ID}}" data-stage="{{.Stage}}"{{if .Chat}} data-chat="1" data-pulse="{{.Pulse}}"{{end}}>
+  <div class="row-head">
+    <button type="button" class="row-line js-row-toggle" aria-expanded="{{if .Open}}true{{else}}false{{end}}" aria-controls="body-{{.ID}}">
+      <span class="line-who {{.Color}}"><span class="line-num">{{.Number}}</span><span class="line-name">{{.Who}}</span></span>
+      <span class="line-src" title="{{.Source}}">{{if .BadgePic}}<img class="badge badge-img" src="{{.BadgePic}}" alt="">{{else}}<span class="badge {{.BadgeColor}}" aria-hidden="true">{{.Badge}}</span>{{end}}<span class="src-name">{{.Source}}</span></span>
+      <span class="line-text"><b class="line-subject">{{.Subject}}</b>{{if .Snippet}}<span class="line-snippet">{{.Snippet}}</span>{{end}}</span>
+      <span class="line-meta">{{if .Live}}<span class="pill chat-live">Live</span>{{end}}{{if .Pending}}<span class="pill wait">{{.Pending}}</span>{{end}}<span class="status s-{{.Stage}}">{{.StageLabel}}</span>{{if .HasFiles}}<span class="line-clip" role="img" aria-label="Has attachments" title="Has attachments">{{template "ic-attach"}}</span>{{end}}{{if gt .Count 1}}<span class="line-count" title="{{.Count}} messages">{{.Count}}</span>{{end}}<time datetime="{{.ISO}}" title="{{.WhenFull}}">{{.When}}</time></span>
+    </button>
+    {{if and .Quick (not .Open)}}<form method="post" action="{{.Quick.Path}}" class="state-act quick-act" data-ajax="row"><button type="submit" class="tertiary quick-btn" aria-label="{{.Quick.Label}}" title="{{.Quick.Label}}">{{template "ic-act" .Quick.Label}}</button></form>{{end}}
+    {{if .Actions}}<div class="line-acts">{{template "actions" .}}</div>
+    <details class="row-menu">
+      <summary aria-label="Actions for {{.Number}}">⋯</summary>
+      <div class="row-menu-list">{{template "actions" .}}</div>
+    </details>{{end}}
+  </div>
+  {{if and .Prop (not .Open)}}<div class="prop-chip{{if .Prop.Why}} has-why{{end}}" role="group" aria-label="Proposal from {{.Prop.By}}">
+      <span class="mark mark-proposal">Proposal</span><span class="prop-main"><span class="prop-text" title="{{.Prop.By}}: {{.Prop.Text}}{{if .Prop.More}} +{{.Prop.More}}{{end}}"><span class="prop-by">{{.Prop.By}}: </span>{{.Prop.Text}}{{if .Prop.More}} +{{.Prop.More}}{{end}}</span>{{if .Prop.Why}}<span class="prop-why" title="{{.Prop.Why}}">{{.Prop.Why}}</span>{{end}}</span>
+      {{if .Prop.Reply}}<span class="prop-hint">Open it to read the text and approve</span>{{end}}<span class="prop-btns">{{if not .Prop.Reply}}<form method="post" action="/proposals/{{.Prop.ID}}/approve" class="prop-act" data-ajax="row">{{if .Open}}<input type="hidden" name="open" value="1">{{end}}<button type="submit">Approve</button></form>{{end}}<form method="post" action="/proposals/{{.Prop.ID}}/dismiss" class="prop-act" data-ajax="row">{{if .Open}}<input type="hidden" name="open" value="1">{{end}}<button type="submit" class="tertiary">Dismiss</button></form></span>
+    </div>{{end}}
+  <time class="line-when" datetime="{{.ISO}}" title="{{.WhenFull}}" aria-hidden="true">{{.When}}</time>
+  {{if .Open}}{{template "body" .Body}}{{end}}
+</li>{{end}}
+
+{{define "body"}}<div class="row-body" id="body-{{.ID}}">
+  <div class="who">
+    <div class="chip {{.Color}}">
+      <span class="num">{{.Number}}</span>
+      <span class="name">{{.Who}}</span>
+      <span class="chip-src">{{if .BadgePic}}<img class="badge badge-on badge-img" src="{{.BadgePic}}" alt="">{{else}}<span class="badge badge-on {{.BadgeC}}" aria-hidden="true">{{.Badge}}</span>{{end}} {{.Source}}</span>
+      <span class="when">{{.When}}</span>
+      {{if or (and (not .Meeting) (not .ClosedSummary)) .Count}}<span class="count-text">{{if eq .Count 1}}1 message{{else}}{{.Count}} messages{{end}}</span>{{end}}
+      {{if .Live}}<span class="pill chat-live">Live</span>{{end}}
+    </div>
+  </div>
+  <div class="what">
+    {{with .Meeting}}<section class="meeting">
+      <p class="meeting-title">{{.Title}}{{if .Mark}} <span class="ag-mark">{{.Mark}}</span>{{end}}</p>
+      <p class="meeting-meta">{{.When}}</p>
+      {{if .Place}}<p class="meeting-meta">{{.Place}}</p>{{end}}
+      {{if .Calendar}}<p class="meeting-meta">{{.Calendar}}</p>{{end}}
+    </section>{{end}}
+    {{with .ClosedSummary}}{{$row := .Row}}<section class="closed-summary">
+      {{if .Intro}}<p class="cs-intro">{{.Intro}}</p>{{end}}
+      {{range .Groups}}<div class="cs-group">
+        <h3 class="cs-title">{{.Title}}</h3>
+        {{if .Reason}}<p class="cs-reason">{{.Reason}}</p>{{end}}
+        <ul class="cs-items">{{range .Items}}<li class="cs-item"><span class="cs-line"><a class="cs-num" href="{{.Open}}">{{.Number}}</a> <span class="cs-who">{{.Who}}</span> · <span class="cs-what">{{.What}}</span>{{if .Why}} <span class="cs-why">{{.Why}}</span>{{end}}</span>{{if .Doubt}}<span class="cs-doubt">{{.Doubt}}</span>{{end}}
+          <form method="post" action="{{.BackPath}}" class="cs-back"><input type="hidden" name="back" value="{{$row}}"><button type="submit" class="tertiary">Bring back</button></form></li>{{end}}</ul>
+      </div>{{end}}
+    </section>{{end}}
+    {{if or .Msgs .Out (and (not .Meeting) (not .ClosedSummary))}}<div class="msgs-wrap">{{template "msgs" .}}</div>{{end}}
+    {{if .Attachments}}<section class="attachments" aria-labelledby="att-{{.ID}}">
+      <h3 class="sub" id="att-{{.ID}}">Attachments</h3>
+      <ul class="files">{{range .Attachments}}<li>{{if .URL}}<a class="file" href="{{.URL}}" download><span class="fname">{{.Name}}</span><span class="size">{{.Size}}</span></a>{{else}}<span class="file pending"><span class="fname">{{.Name}}</span></span>{{end}} <span class="att-by">added by {{.By}} · {{.Dated}} <time datetime="{{.ISO}}" title="{{.WhenFull}}">{{.When}}</time></span></li>{{end}}</ul>
+    </section>{{end}}
+    {{with .Write}}{{template "chatbox" .}}{{end}}
+  </div>
+  <div class="thread">{{template "thread" .}}</div>
+</div>{{end}}
+
+{{define "msgs"}}<ol class="msgs" aria-label="Messages of {{.Number}}">
+  {{- range .Out}}
+  <li class="msg msg-out{{if .Failed}} msg-failed{{end}}">
+    <p class="dir"><b class="from"><span class="from-dot c0" aria-hidden="true"></span>You</b> · <time datetime="{{.ISO}}" title="{{.WhenFull}}">{{.When}}</time></p>
+    {{if .Text}}<div class="text">{{.Text}}</div>{{end}}
+    {{with .File}}<ul class="files"><li>{{if .URL}}<a class="file" href="{{.URL}}" download><span class="fname">{{.Name}}</span><span class="size">{{.Size}}</span></a>{{end}}</li></ul>{{end}}
+    <p class="out-state{{if .Failed}} error{{end}}" role="status">{{.Status}}</p>
+    {{if .Group}}<div class="prop-acts"><form method="post" action="/writes/{{.Group}}/withdraw" class="prop-act" data-ajax="row"><input type="hidden" name="open" value="1"><button type="submit" class="secondary">Withdraw</button></form></div>{{end}}
+  </li>
+  {{- end}}
+  {{- range .Msgs}}
+  <li class="msg">
+    <p class="dir"><b class="from">{{if .Picture}}<img class="avatar avatar-s" src="{{.Picture}}" alt="">{{else}}<span class="from-dot {{.Color}}" aria-hidden="true"></span>{{end}}{{.Name}}</b> · <time datetime="{{.ISO}}" title="{{.WhenFull}}">{{.When}}</time>{{if .Source}} · <span class="msg-src">{{.Source}}</span>{{end}}{{if .Edited}} · <span class="edited">edited</span>{{end}}{{if .Deleted}} · <span class="edited deleted">deleted</span>{{end}}</p>
+    {{if .Subject}}<p class="msg-subject">{{.Subject}}</p>{{end}}
+    {{if .Text}}<div class="text{{if .Long}} folded{{end}}"{{if .Long}} data-fold{{end}}>{{.Text}}</div>{{if .Long}}<button type="button" class="tertiary fold-toggle" aria-expanded="false">Show all</button>{{end}}{{if .Cut}}<p class="hint">The rest of this message is kept in the original.</p>{{end}}{{end}}
+    {{range .Pictures}}<a class="pic-link" href="{{.URL}}/view" target="_blank" rel="noopener" title="Open full size"><img class="pic pic-fit" src="{{.URL}}" alt="{{.Name}}" loading="lazy"></a>{{end}}
+    {{if .Files}}<ul class="files">{{range .Files}}<li>{{if .URL}}<a class="file" href="{{.URL}}" download><span class="fname">{{.Name}}</span><span class="size">{{.Size}}</span></a>{{else}}<span class="file pending"><span class="fname">{{.Name}}</span></span>{{end}}</li>{{end}}</ul>{{end}}
+  </li>
+  {{- end}}
+</ol>
+{{if .Older}}<div class="older">
+  <p class="older-line">{{.OlderL}}</p>
+  <button type="button" class="tertiary js-older" data-url="/items/{{.ID}}/messages">Show older</button>
+</div>{{end}}{{end}}
+
+{{define "chatbox"}}<form method="post" action="{{.Action}}" class="say chatbox" enctype="multipart/form-data" data-ajax="chatwrite" novalidate>
+  <div class="say-line">
+    <textarea name="text" rows="1" maxlength="8000" placeholder="{{.Placeholder}}" aria-label="{{.Placeholder}}"></textarea>
+    <div class="say-acts">
+      <input type="file" name="file" multiple class="attach-input" aria-label="Files to attach" hidden><button type="button" class="secondary js-attach">Attach</button>
+      <button type="submit">Send</button>
+    </div>
+  </div>
+  <ul class="attach-list" aria-live="polite"></ul>
+  <p class="error say-error" role="alert" hidden></p>
+</form>{{end}}
+
+{{define "reply"}}<div class="reply-box">
+  <p class="reply-label">{{.Reply.Label}}</p>
+  {{if .Reply.Editable}}<form method="post" action="/proposals/{{.PropID}}/approve" class="reply-form" id="reply-{{.PropID}}" data-ajax="row" data-reply>
+    <input type="hidden" name="open" value="1">
+    <textarea name="text" class="reply-text" rows="7" spellcheck="true" aria-label="Text of the reply; you can edit it before you approve">
+{{.Reply.Text}}</textarea>
+  </form>
+  {{template "replyto" .Reply}}
+  <p class="error reply-error" role="alert" hidden></p>
+  <div class="prop-acts reply-acts">
+    <button type="submit" form="reply-{{.PropID}}" class="js-approve">Approve</button>
+    <button type="button" class="secondary js-discuss">Discuss</button>
+    <form method="post" action="/proposals/{{.PropID}}/dismiss" class="prop-act" data-ajax="row"><input type="hidden" name="open" value="1"><button type="submit" class="tertiary">Dismiss</button></form>
+  </div>
+  <div class="prop-acts reply-confirm" role="group" aria-label="Send this reply?" hidden>
+    <span class="reply-ask">Send this reply?</span>
+    <button type="button" class="js-send">Send</button>
+    <button type="button" class="secondary js-cancel">Cancel</button>
+  </div>
+  {{else}}{{template "replyto" .Reply}}{{if not .Reply.Hidden}}<div class="text reply-text-shown">{{.Reply.Text}}</div>{{end}}{{end}}
+</div>{{end}}
+
+{{define "replyto"}}<p class="reply-to"><span class="k">To</span> {{range $i, $a := .To}}{{if $i}}, {{end}}{{$a}}{{end}}</p>{{if .Cc}}<p class="reply-to"><span class="k">Cc</span> {{range $i, $a := .Cc}}{{if $i}}, {{end}}{{$a}}{{end}}</p>{{end}}{{end}}
+
+{{define "thread"}}{{if .Entries}}<ol class="entries" aria-label="Thread of {{.Number}}">
+  {{- range .Entries}}
+  {{if .Notice}}<li class="entry notice"><time datetime="{{.ISO}}" title="{{.WhenFull}}">{{.When}}</time> {{.Text}}</li>
+  {{- else}}<li class="entry {{if .Agent}}agent{{else}}mine{{end}}{{if eq .Kind "proposal"}} proposal{{end}}">
+    <p class="by"><b>{{.By}}</b>{{if .Mark}} <span class="mark mark-{{.Kind}}{{if eq .Mark "Withdrawn"}} mark-withdrawn{{end}}">{{.Mark}}</span>{{end}} · <time datetime="{{.ISO}}" title="{{.WhenFull}}">{{.When}}</time></p>
+    {{if .Reply}}{{template "reply" .}}{{else}}{{if .Text}}<p class="text">{{.Text}}</p>{{end}}{{range .Attached}}<p class="attached">Attached: <span class="fname">{{.}}</span> <a class="to-list" href="#att-{{$.ID}}">see Attachments</a></p>{{end}}{{end}}
+    {{if .Withdraw}}<div class="prop-acts"><form method="post" action="/proposals/{{.Withdraw}}/withdraw" class="prop-act" data-ajax="row"><input type="hidden" name="open" value="1"><button type="submit" class="secondary">Withdraw</button></form></div>{{end}}
+    {{if .Reason}}<p class="reason">{{.Reason}}</p>{{end}}
+    {{if and .Waiting (not .Reply)}}<div class="prop-acts">
+      <form method="post" action="/proposals/{{.PropID}}/approve" class="prop-act" data-ajax="row"><input type="hidden" name="open" value="1"><button type="submit">Approve</button></form>
+      <form method="post" action="/proposals/{{.PropID}}/dismiss" class="prop-act" data-ajax="row"><input type="hidden" name="open" value="1"><button type="submit" class="secondary">Dismiss</button></form>
+    </div>{{end}}
+  </li>{{end}}
+  {{- end}}
+</ol>{{else}}<p class="hint">No notes yet.</p>{{end}}
+<div class="say-bar">{{if .Actions}}<div class="bar-acts" role="group" aria-label="Actions for {{.Number}}">{{range .Actions}}<form method="post" action="{{.Path}}" class="state-act" data-ajax="row"><input type="hidden" name="open" value="1"><button type="submit" class="tertiary bar-btn" aria-label="{{.Label}}" title="{{.Label}}">{{template "ic-act" .Label}}<span class="bar-word">{{.Label}}</span></button></form>{{end}}</div>{{end}}
+<form method="post" action="/items/{{.ID}}/notes" class="say notebox" enctype="multipart/form-data" data-ajax="thread" novalidate>
+  <div class="say-line">
+    <textarea name="text" rows="1" maxlength="4000" placeholder="Add a note or ask Claude…" aria-label="Note for {{.Number}}"></textarea>
+    <div class="say-acts">
+      <input type="file" name="file" multiple class="attach-input" aria-label="Files to attach to the note" hidden><button type="button" class="secondary js-attach" aria-label="Attach" title="Attach">{{template "ic-attach"}}<span class="bar-word">Attach</span></button>
+      <button type="submit" aria-label="Send" title="Send">{{template "ic-send"}}<span class="bar-word">Send</span></button>
+    </div>
+  </div>
+  <ul class="attach-list" aria-live="polite"></ul>
+  <p class="error say-error" role="alert" hidden>Write something first.</p>
+</form></div>{{end}}

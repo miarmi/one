@@ -1,0 +1,143 @@
+name: server
+# Look at the server, install its updates, restart it or roll an app back,
+# from GitHub's Actions tab. setup-code and reset-password store a one-time
+# code for the lab's login by its SHA-256 only (platform/scripts/new-setup-code.sh
+# makes one); the code itself never passes through GitHub.
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: What to do
+        type: choice
+        options: [status, logs, rollback, probe, upgrade, reboot, setup-code, reset-password]
+        default: status
+      app:
+        description: App (for logs and rollback)
+        type: string
+        default: hello
+      env:
+        description: prod or a preview name (for logs and rollback)
+        type: string
+        default: prod
+      lines:
+        description: How many of the newest log lines (for logs, 1 to 20000)
+        type: string
+        default: '200'
+      url:
+        description: Address to fetch (for probe)
+        type: string
+        default: ''
+      code_sha256:
+        description: SHA-256 of a setup code (for setup-code and reset-password)
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  server:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ${{ vars.LAB_RUNNER || 'lab-runner' }}
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - name: Run
+        env:
+          ACTION: ${{ inputs.action }}
+          APP: ${{ inputs.app }}
+          ENV: ${{ inputs.env }}
+          LINES: ${{ inputs.lines }}
+          URL: ${{ inputs.url }}
+          CODE_SHA256: ${{ inputs.code_sha256 }}
+        run: |
+          . platform/scripts/gh-lib.sh
+          if [[ ! "$APP" =~ ^[a-z][a-z0-9]{1,19}$ || ! "$ENV" =~ ^[a-z0-9-]{1,30}$ ]]; then
+            echo "::error::Invalid app or env"
+            exit 1
+          fi
+          case "$ACTION" in
+            status)
+              out="$(platform/scripts/lab-api.sh GET /api/status)"
+              table="$(jq -r '"| App | Where | Status | Sandbox | Commit | Deployed | Address |", "|---|---|---|---|---|---|---|",
+                (.instances[] | "| \(.app) | \(.env) | \(.status) | \(.sandbox // "") | \(.commit[0:7]) | \(.deployed_at) | \(.url)\(if .certificate == false then " (certificate pending)" else "" end) |")' <<<"$out")"
+              login="$(jq -r 'if .mode == "domain" then "Lab address: https://\(.base) (certificate: \(.certificate)). Login password set: \(.login.password_set)." else "Bootstrap mode: plain HTTP on \(.base), no login page." end' <<<"$out")"
+              sandbox="$(jq -r 'if .sandbox then "Sandbox \(.sandbox.version // ""): hardened \(.sandbox.hardened // false)\(if .sandbox.hardened_error then " (\(.sandbox.hardened_error))" else "" end), apps bind only their port \(.sandbox.bind_rules), app firewall \(.sandbox.firewall)." else "" end' <<<"$out")"
+              host="$(platform/scripts/lab-api.sh GET /api/host)"
+              system="$(jq -r '"\(.os), kernel \(.kernel), up since \(.booted_at). Disk: \(.disk.free_gb) GB free (\(.disk.free_percent) %).",
+                "Updates waiting: \(.updates.pending // "?") (\(.updates.security // "?") security)\(if (.updates.packages // []) | length > 0 then ": " + ([.updates.packages[] | .package + " " + .to] | join(", ")) else "" end). Package lists from \(.updates.lists_updated_at).",
+                "Restart needed for updates: \(.reboot_required)\(if (.reboot_for | length) > 0 then " (" + (.reboot_for | join(", ")) + ")" else "" end).",
+                "Hardening: \(.hardening.sysctl.applied // "?") kernel settings, failed: \((.hardening.sysctl.failed // []) | length); SSH \(.hardening.ssh // "?"); labd guard \(.hardening.labd_guard // "?"); blocked modules still loaded: \((.hardening.modules.still_loaded // []) | join(", "))."' <<<"$host")"
+              gh_summary "### Server status (labd $(jq -r .version <<<"$out"), $(jq -r .mode <<<"$out") mode)" "" "$table" "" "$login" "" "$sandbox" "" "### The server itself" "" "$system" "" "Last unattended upgrade: $(jq -r '.last_unattended_upgrade.at' <<<"$host")" '```' "$(jq -r '.last_unattended_upgrade.log' <<<"$host")" '```' "Upgrade started from here: $(jq -r '.upgrade_job.activestate // "never"' <<<"$host") $(jq -r '.upgrade_job.result // ""' <<<"$host")" '```' "$(jq -r '.upgrade_job.log // ""' <<<"$host" | tail -n 30)" '```'
+              gh_annotate notice "Server status" "$(jq -c . <<<"$out")"
+              gh_annotate notice "The server itself" "$system"
+              ;;
+            upgrade)
+              out="$(platform/scripts/lab-api.sh POST /api/host/upgrade)"
+              gh_annotate notice "Installing updates" "Started; it runs on the server by itself. Run 'status' in a few minutes to see the result and whether a restart is needed."
+              gh_summary "### Installing updates" "" '```' "$out" '```'
+              ;;
+            reboot)
+              out="$(platform/scripts/lab-api.sh POST /api/host/reboot)"
+              ip="$(jq -r .server_ip lab.json)"
+              went_down=false
+              for _ in $(seq 1 120); do
+                sleep 3
+                if ! curl -fsS -m 5 "http://$ip/healthz" >/dev/null 2>&1; then
+                  went_down=true
+                elif [[ "$went_down" == true ]]; then
+                  sleep 20 # labd starts the apps again
+                  gh_annotate notice "Server restarted" "It is back; labd started the apps again. $out"
+                  exit 0
+                fi
+              done
+              gh_annotate error "Server restart" "The server did not come back within 6 minutes (went down: $went_down). The Hetzner console shows what it is doing."
+              exit 1
+              ;;
+            logs)
+              if [[ ! "$LINES" =~ ^[0-9]{1,5}$ ]] || (( 10#$LINES < 1 || 10#$LINES > 20000 )); then
+                echo "::error::lines must be 1 to 20000"
+                exit 1
+              fi
+              out="$(platform/scripts/lab-api.sh GET "/api/logs?app=$APP&env=$ENV&lines=$((10#$LINES))")"
+              # The whole answer goes to the job log, where an agent reads it;
+              # the summary page keeps the newest 200 lines.
+              printf '%s\n' "$out"
+              gh_summary "### Logs of $APP ($ENV), newest 200 of $((10#$LINES)) asked" '```' "$(tail -n 200 <<<"$out")" '```'
+              gh_annotate notice "Logs of $APP ($ENV)" "$(tail -n 60 <<<"$out")"
+              ;;
+            probe)
+              if [[ ! "$URL" =~ ^https?://[a-z0-9.-]+(:[0-9]+)?(/[A-Za-z0-9._~/?=\&%-]*)?$ ]]; then
+                echo "::error::Invalid url"
+                exit 1
+              fi
+              out="$(curl -sS -m 20 -D - -o "$RUNNER_TEMP/body" "$URL" || true)"
+              body="$(head -c 3000 "$RUNNER_TEMP/body")"
+              gh_annotate notice "Probe $URL" "$out"$'\n'"$body"
+              ;;
+            setup-code | reset-password)
+              if [[ ! "$CODE_SHA256" =~ ^[0-9a-f]{64}$ ]]; then
+                echo "::error::code_sha256 must be the SHA-256 of a setup code (64 hex digits; platform/scripts/new-setup-code.sh)"
+                exit 1
+              fi
+              jq -n --arg s "$CODE_SHA256" '{code_sha256: $s}' >"$RUNNER_TEMP/code.json"
+              uri=/api/setup-code
+              if [[ "$ACTION" == reset-password ]]; then
+                uri="/api/setup-code?reset=1"
+              fi
+              out="$(platform/scripts/lab-api.sh POST "$uri" "$RUNNER_TEMP/code.json")"
+              gh_annotate notice "Setup code stored" "It works once, until $(jq -r '.expires | todate' <<<"$out"), at $(jq -r '.url // "the lab once it has its domain"' <<<"$out")"
+              ;;
+            rollback)
+              out="$(platform/scripts/lab-api.sh POST "/api/rollback?app=$APP&env=$ENV")"
+              gh_summary "### Rolled back $APP ($ENV)" "" '```' "$out" '```'
+              gh_annotate notice "Rolled back $APP ($ENV)" "$out"
+              ;;
+          esac

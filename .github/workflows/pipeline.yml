@@ -1,0 +1,963 @@
+name: pipeline
+# Spec first, then two speeds; big and small releases (the owner, 2026-11-16).
+# Nothing is built for an app without a SPEC.md.
+# Big release of an app: its SPEC.md differs from the work toolduction runs, or
+# it is not in production yet (platform/scripts/release-kind.sh). Small
+# release: SPEC.md unchanged; it ships without acceptance tests.
+# Branches (prototypes): every push builds the changed apps, deploys the
+# preview and runs the quick checks; no browser tests. The full acceptance
+# run happens only on request (run this workflow on the branch with
+# "full" ticked) and ends with "Ready to ship" or "Not ready to ship".
+# main (ship): big releases only after the full browser matrix passed and
+# their tests match their SPEC.md; small releases after build, vet and unit
+# tests. Every deploy is health- and smoke-checked and rolls back on failure.
+# Faster runs (the owner, 2026-11-20): a full run tests the apps a push of the
+# branch builds; the preview deploys before any test job starts; preview
+# tests use two browsers; main accepts the branch's "Ready to ship" verdict
+# for the very same commit (platform/scripts/verdict.sh) instead of running the
+# acceptance matrix again; and a full run after a green one is short when only
+# style or documents changed since (platform/scripts/short-run.sh).
+# Shared files (the owner, 2026-11-22): when only a shared file changed (go.mod,
+# go.sum, platform/appkit/, e2e/, build-app.sh), an app whose own folder did not
+# change gets the quick checks only (build, vet, unit tests; on main also the
+# deploy with health and smoke checks), no browser matrix. If e2e/ or
+# platform/appkit/ changed and no app's own folder did, the smallest app (hello)
+# runs its matrix as a canary (platform/scripts/changes.sh).
+
+on:
+  push:
+    branches: ['**']
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Retest and redeploy the platform and every app
+        type: boolean
+        default: false
+      full:
+        description: Full acceptance run on this branch (browser tests on its preview, then the verdict)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pipeline-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  PLAYWRIGHT_VERSION: 1.56.0
+
+jobs:
+  plan:
+    runs-on: ${{ vars.LAB_RUNNER || 'lab-runner' }}
+    timeout-minutes: 10 # a stuck job must not burn Actions minutes for hours
+    permissions:
+      contents: read
+      id-token: write # to ask labd what production runs
+      actions: read # earlier runs of this workflow (verdict.sh) ...
+      checks: read # ... and their annotations
+    outputs:
+      apps: ${{ steps.plan.outputs.apps }}
+      any_app: ${{ steps.plan.outputs.any_app }}
+      big: ${{ steps.plan.outputs.big }}
+      test_apps: ${{ steps.plan.outputs.test_apps }}
+      any_test: ${{ steps.plan.outputs.any_test }}
+      full: ${{ steps.plan.outputs.full }}
+      platform: ${{ steps.plan.outputs.platform }}
+      deploy: ${{ steps.plan.outputs.deploy }}
+      main: ${{ steps.plan.outputs.main }}
+      preview: ${{ steps.plan.outputs.preview }}
+      short_apps: ${{ steps.plan.outputs.short_apps }}
+      accepted: ${{ steps.plan.outputs.accepted }}
+      accepted_run: ${{ steps.plan.outputs.accepted_run }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          fetch-depth: 0
+      # So the owner can judge whether a bigger test server would pay off.
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        continue-on-error: true
+        with:
+          node-version: 22
+      - name: Size of the test server
+        continue-on-error: true
+        run: |
+          . platform/scripts/gh-lib.sh
+          gh_summary "### Test server size" ""
+          if command -v node >/dev/null 2>&1; then
+            # The very function e2e/playwright.config.ts uses for its workers.
+            all="$(node e2e/workers.cjs "$(jq length e2e/projects.json)")"
+            two="$(node e2e/workers.cjs 2)"
+            gh_summary "Total memory $(jq -r .total_mb <<<"$all") MB, free now $(jq -r .free_mb <<<"$all") MB, this job's memory limit $(jq -r '.job_limit_mb // "none"' <<<"$all") MB, $(jq -r .cpus <<<"$all") CPUs." \
+              "" "Playwright would use **$(jq -r .workers <<<"$all") workers** for the $(jq -r .projects <<<"$all") browser projects of a local run and $(jq -r .workers <<<"$two") for the 2 of a short run (the formula is in e2e/workers.cjs, measured now: the runner may be busy)." ""
+          else
+            gh_summary "Total memory $(grep -m1 MemTotal /proc/meminfo | tr -s ' ' | cut -d' ' -f2) kB, $(nproc) CPUs. Node is not available here, so the worker count is not shown." ""
+          fi
+      - id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BEFORE: ${{ github.event.before }}
+          FORCE: ${{ inputs.force && 'true' || 'false' }}
+          FULL: ${{ github.event_name == 'workflow_dispatch' && inputs.full && 'true' || 'false' }}
+        run: |
+          . platform/scripts/gh-lib.sh
+          branch="$GITHUB_REF_NAME"
+          force="$FORCE"
+          deploy=false
+          server_ip="$(jq -r '.server_ip // ""' lab.json)"
+          if [[ -n "$server_ip" ]]; then
+            deploy=true
+            stage="$(curl -fsS -m 15 "http://$server_ip/healthz" 2>/dev/null | jq -r '.stage // ""' 2>/dev/null || true)"
+            # A fresh server still runs the seed: install labd and every app.
+            if [[ "$branch" == main && "$stage" == seed ]]; then
+              force=true
+            fi
+          fi
+          # On main, compare with what production runs, so a change whose run
+          # was cancelled or failed still ships with this one. Every branch
+          # also needs it to tell big releases from small ones.
+          running=""
+          if [[ "${stage:-}" == labd && "$force" != true ]]; then
+            if status="$(platform/scripts/lab-api.sh GET /api/status)"; then
+              running="$RUNNER_TEMP/running.json"
+              jq '{labd: .version,
+                   apps: ([.instances[] | select(.env == "prod" and .status == "running") | {(.app): .commit}] | add // {}),
+                   held: [.instances[] | select(.env == "prod" and .rolled_back == true) | .app]}' \
+                <<<"$status" >"$running"
+              echo "production runs: $(jq -c . "$running")"
+            else
+              gh_annotate warning "Server status unavailable" "Compared with the previous push instead of what production runs, and every app counts as a big release."
+            fi
+          fi
+          changes="$(platform/scripts/changes.sh "$BEFORE" "$branch" "$force" "$running")"
+          apps="$(jq -c .apps <<<"$changes")"
+          own="$(jq -c .own <<<"$changes")"
+          canary="$(jq -r .canary <<<"$changes")"
+          quick="$(jq -c --argjson o "$own" '.apps - $o' <<<"$changes")"
+          main=false
+          preview=""
+          if [[ "$branch" == main ]]; then
+            main=true
+          elif ! preview="$(platform/scripts/preview-name.sh "$branch")"; then
+            preview=""
+            gh_annotate warning "No preview" "Branch '$branch' is not a preview name (lowercase letters, digits and single hyphens, at most 30), so it is tested but not deployed. Rename it to get a preview."
+          fi
+          tests_changed="$(jq -r '.tests_changed | join(", ")' <<<"$changes")"
+          if [[ -n "$tests_changed" ]]; then
+            gh_annotate warning "Spec or tests changed" "This push changes the approved SPEC.md, the acceptance tests or the test harness of: $tests_changed"
+            gh_summary "**Spec, tests or test harness changed for:** $tests_changed"
+          fi
+          # Big or small release, per app (see the top of this file). An app
+          # that is here only because a shared file changed gets the quick
+          # checks only: never a big release, no browser matrix.
+          big="[]"
+          if [[ "$apps" != "[]" ]]; then
+            gh_summary "### Release kind" "" "| App | Kind | Why |" "|---|---|---|"
+          fi
+          for app in $(jq -r '.[]' <<<"$apps"); do
+            if jq -e --arg a "$app" 'index($a)' <<<"$quick" >/dev/null; then
+              how="build, go vet and unit tests"
+              [[ "$main" != true ]] || how+=", then the deploy with health check, smoke check and rollback"
+              gh_summary "| $app | quick checks only: shared files changed | its own folder did not change: $how; no browser matrix |"
+              continue
+            fi
+            out="$(platform/scripts/release-kind.sh "$app" "$running")"
+            kind="${out%%$'\n'*}"
+            why="${out#*$'\n'}"
+            if [[ "$kind" == big ]]; then
+              big="$(jq -c --arg a "$app" '. + [$a]' <<<"$big")"
+              gh_summary "| $app | big release: full tests | $why |"
+            else
+              gh_summary "| $app | small release: acceptance tests skipped | $why |"
+            fi
+          done
+          # Browser tests: on main for big releases that no branch run
+          # already tested for this very commit; on a branch only in the full
+          # run on request, then for the apps a push would build for the branch
+          # (its own apps, or all of them after a change to shared files).
+          full=false
+          test_apps="[]"
+          accepted="[]"
+          accepted_run=""
+          short_apps="[]"
+          canary_accepted="[]"
+          if [[ "$branch" == main ]]; then
+            test_apps="$big"
+            if [[ "$big" != "[]" ]]; then
+              verdict="$(platform/scripts/verdict.sh accepted "$GITHUB_SHA" "$big" || true)"
+              accepted="$(jq -c '.accepted | if type == "array" then . else [] end' <<<"$verdict" 2>/dev/null || echo '[]')"
+              accepted_run="$(jq -r '.run // ""' <<<"$verdict" 2>/dev/null || true)"
+              note="$(jq -r '.note // "no verdict"' <<<"$verdict" 2>/dev/null || echo "no verdict")"
+              test_apps="$(jq -c --argjson a "$accepted" '. - $a' <<<"$big")"
+              gh_summary "### Acceptance tests on main" "" "| App | Path taken |" "|---|---|"
+              for app in $(jq -r '.[]' <<<"$big"); do
+                if jq -e --arg a "$app" 'index($a)' <<<"$accepted" >/dev/null; then
+                  gh_summary "| $app | accepted: [the full run on the branch]($accepted_run) for this same commit ended \"Ready to ship\" and tested this big release; no acceptance matrix again (build, vet, unit tests, health and smoke checks still run) |"
+                else
+                  gh_summary "| $app | full matrix: $note |"
+                fi
+              done
+            fi
+            # The canary (e2e/ or platform/appkit/ changed, no app folder did):
+            # accepted when the branch run for this very commit browser-tested it.
+            if [[ -n "$canary" ]]; then
+              gh_summary "### Canary on main" "" "e2e/ or platform/appkit/ changed and no app's own folder did, so the smallest app, $canary, runs its browser matrix as a canary." ""
+              verdict="$(platform/scripts/verdict.sh accepted "$GITHUB_SHA" "[\"$canary\"]" "Tested apps" || true)"
+              if jq -e --arg a "$canary" '.accepted | index($a)' <<<"$verdict" >/dev/null 2>&1; then
+                canary_accepted="[\"$canary\"]"
+                gh_summary "| $canary | canary accepted: [the full run on the branch]($(jq -r '.run // ""' <<<"$verdict")) for this same commit tested it and ended \"Ready to ship\"; no matrix again |"
+              else
+                test_apps="$(jq -c --arg a "$canary" '. + [$a] | unique' <<<"$test_apps")"
+                gh_summary "| $canary | canary: full matrix: $(jq -r '.note // "no verdict"' <<<"$verdict" 2>/dev/null || echo "no verdict") |"
+              fi
+            fi
+          elif [[ "$FULL" == true ]]; then
+            full=true
+            # Browser matrix: apps whose own folder changed, plus the canary.
+            test_apps="$own"
+            if [[ -n "$canary" ]]; then
+              test_apps="$(jq -c --arg a "$canary" '. + [$a] | unique' <<<"$test_apps")"
+            fi
+            if [[ "$test_apps" == "[]" ]]; then
+              if [[ "$apps" == "[]" ]]; then
+                gh_annotate notice "Nothing to test" "This branch changes no app and no shared file, so the full run has no app to test."
+                gh_summary "**This branch changes no app and no shared file, so the full run has nothing to test.**"
+              else
+                gh_annotate notice "Quick checks only" "Only shared files changed (go.mod, go.sum or build-app.sh) and no app folder, so every app gets the quick checks only: build, go vet and unit tests. No browser matrix."
+                gh_summary "**Only shared files changed and no app folder: quick checks only: shared files changed.** Every app gets build, go vet and unit tests, no browser matrix."
+              fi
+            else
+              gh_summary "### Full run" ""
+              if [[ "$own" != "[]" ]]; then
+                gh_summary "Browser matrix for the apps whose own folder changed: $(jq -r 'join(", ")' <<<"$own")." ""
+              fi
+              if [[ -n "$canary" ]]; then
+                gh_summary "**Canary:** e2e/ or platform/appkit/ changed and no app's own folder did, so the smallest app, $canary, runs its browser matrix to test the change." ""
+              fi
+              if [[ "$quick" != "[]" ]]; then
+                gh_summary "**Quick checks only: shared files changed**, for: $(jq -r 'join(", ")' <<<"$quick")." ""
+              fi
+            fi
+            # A short run after a green full run: only style or documents
+            # changed since the commit an earlier full run called ready.
+            if [[ "$test_apps" != "[]" && "$force" != true ]]; then
+              earlier="$(platform/scripts/verdict.sh earlier "$branch" "$GITHUB_SHA" "$test_apps" || true)"
+              gh_summary "| App | Tests |" "|---|---|"
+              for app in $(jq -r '.[]' <<<"$test_apps"); do
+                x="$(jq -r --arg a "$app" '.[$a].sha // ""' <<<"$earlier" 2>/dev/null || true)"
+                if [[ -z "$x" ]]; then
+                  gh_summary "| $app | whole matrix: no earlier full run of this branch ended \"Ready to ship\" with this app tested |"
+                  continue
+                fi
+                out="$(platform/scripts/short-run.sh "$x" "$app" || true)"
+                if [[ "${out%%$'\n'*}" == short ]]; then
+                  files="${out#short}"
+                  files="${files#$'\n'}"
+                  files="$(paste -sd, - <<<"${files:-nothing}" | sed 's/,/, /g')"
+                  short_apps="$(jq -c --arg a "$app" '. + [$a]' <<<"$short_apps")"
+                  gh_annotate notice "Short run for $app" "short run: only style or documents changed since ${x::7}: $files"
+                  gh_summary "| $app | short run: only style or documents changed since ${x::7} ([earlier run]($(jq -r --arg a "$app" '.[$a].run' <<<"$earlier"))): $files. Local tests in chromium-desktop and webkit-phone, preview tests in chromium-desktop |"
+                else
+                  gh_summary "| $app | whole matrix: ${out#*$'\n'} (since ${x::7}) |"
+                fi
+              done
+            fi
+          fi
+          {
+            echo "apps=$apps"
+            echo "any_app=$(jq -r 'length > 0' <<<"$apps")"
+            echo "big=$big"
+            echo "quick=$quick"
+            echo "test_apps=$test_apps"
+            echo "any_test=$(jq -r 'length > 0' <<<"$test_apps")"
+            echo "full=$full"
+            echo "platform=$(jq -r .platform <<<"$changes")"
+            echo "deploy=$deploy"
+            echo "main=$main"
+            echo "preview=$preview"
+            echo "short_apps=$short_apps"
+            echo "accepted=$accepted"
+            echo "canary=$canary"
+            echo "accepted_run=$accepted_run"
+          } >>"$GITHUB_OUTPUT"
+          echo "branch=$branch apps=$apps platform=$(jq -r .platform <<<"$changes") deploy=$deploy preview=$preview"
+
+  # Prototype speed: build and deploy the preview without waiting for tests.
+  preview:
+    needs: plan
+    if: >-
+      needs.plan.outputs.main != 'true' &&
+      needs.plan.outputs.deploy == 'true' &&
+      needs.plan.outputs.preview != '' &&
+      needs.plan.outputs.any_app == 'true'
+    runs-on: ${{ vars.LAB_RUNNER || 'lab-runner' }}
+    timeout-minutes: 20 # a stuck job must not burn Actions minutes for hours
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      urls: ${{ steps.deploy.outputs.urls }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Restore the build cache
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: go-static-${{ runner.os }}-${{ hashFiles('go.sum', 'platform/scripts/build-app.sh') }}
+      - name: Build and deploy the preview
+        id: deploy
+        env:
+          APPS: ${{ needs.plan.outputs.apps }}
+          PREVIEW: ${{ needs.plan.outputs.preview }}
+        run: |
+          . platform/scripts/gh-lib.sh
+          urls="{}"
+          gh_summary "### Preview" "" "| App | Address |" "|---|---|"
+          for app in $(jq -r '.[]' <<<"$APPS"); do
+            # Spec first: an app without a SPEC.md is never built.
+            if [[ "$(platform/scripts/app-state.sh "$app" | head -n 1)" == nospec ]]; then
+              gh_annotate warning "$app was not built" "It has no SPEC.md yet. Agree on the spec with the owner first."
+              gh_summary "| $app | not built: no spec yet |"
+              continue
+            fi
+            platform/scripts/build-app.sh "$app" >/dev/null
+            if ! out="$(platform/scripts/lab-api.sh POST "/api/deploy?app=$app&env=$PREVIEW&commit=$GITHUB_SHA" "dist/$app.tar.gz")"; then
+              msg="$(jq -r '.error // empty' <<<"$out" 2>/dev/null || true)"
+              logs="$(jq -r '.logs // empty' <<<"$out" 2>/dev/null | tail -n 40 || true)"
+              gh_annotate error "Preview of $app failed" "${msg:-$out}"$'\n'"$logs"
+              gh_summary "| $app | failed: ${msg:-see log} |"
+              exit 1
+            fi
+            url="$(jq -r .url <<<"$out")"
+            gh_annotate notice "Preview of $app" "$url"
+            gh_summary "| $app | $url |"
+            urls="$(jq -c --arg a "$app" --arg u "$url" '. + {($a): $u}' <<<"$urls")"
+          done
+          echo "urls=$urls" >>"$GITHUB_OUTPUT"
+
+  # Starts after the preview deploy has finished or been skipped (never
+  # depends on its success), so a pushed change reaches its preview first.
+  checks:
+    needs: [plan, preview]
+    if: ${{ !cancelled() && needs.plan.result == 'success' }}
+    runs-on: ${{ vars.LAB_RUNNER || 'lab-runner' }}
+    timeout-minutes: 30 # a stuck job must not burn Actions minutes for hours
+    outputs:
+      vulnerable: ${{ steps.vuln.outputs.found }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+      - name: Go formatting
+        run: |
+          unformatted="$(gofmt -l apps platform)"
+          if [[ -n "$unformatted" ]]; then
+            echo "::error title=gofmt::These files need gofmt: $unformatted"
+            exit 1
+          fi
+      - name: Go vet
+        run: go vet ./...
+      - name: Go unit tests
+        run: go test -race ./...
+      - name: Known vulnerabilities in our Go code and Go itself
+        id: vuln
+        env:
+          MAIN: ${{ needs.plan.outputs.main }}
+        run: |
+          . platform/scripts/gh-lib.sh
+          set +e
+          out="$(go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./... 2>&1)"
+          rc=$?
+          set -e
+          echo "$out"
+          case "$rc" in
+            0) exit 0 ;;
+            3) ;; # vulnerabilities that our code reaches
+            *)
+              if [[ "$MAIN" == true ]]; then
+                gh_annotate error "Vulnerability check did not run" "Nothing ships unchecked; run the pipeline again. $(tail -n 20 <<<"$out")"
+                exit 1
+              fi
+              gh_annotate warning "Vulnerability check did not run" "$(tail -n 20 <<<"$out")"
+              exit 0
+              ;;
+          esac
+          echo "found=true" >>"$GITHUB_OUTPUT"
+          ids="$(grep -oE 'GO-[0-9]{4}-[0-9]+' <<<"$out" | sort -u | tr '\n' ' ')"
+          if [[ "$MAIN" == true ]]; then
+            gh_annotate error "Known vulnerabilities" "Fix before shipping (usually a newer Go in go.mod or a newer module): $ids"
+            exit 1
+          fi
+          gh_annotate warning "Known vulnerabilities" "Fine for a prototype, must be fixed before shipping: $ids"
+      - name: Seed tests
+        run: python3 platform/seed/test_seed.py
+      - name: Server setup text is valid
+        run: python3 platform/cloudinit/build.py
+      - name: Test server setup and job manager
+        run: |
+          python3 platform/runner/test_runner.py
+          python3 platform/runner/build.py
+          shellcheck platform/runner/lab-runner-token platform/runner/install-browser-libs
+      - name: Spec and acceptance tests of every big release
+        env:
+          MAIN: ${{ needs.plan.outputs.main }}
+          BIG: ${{ needs.plan.outputs.big }}
+        run: |
+          . platform/scripts/gh-lib.sh
+          fail=0
+          for f in apps/*/app.json; do
+            app="$(basename "$(dirname "$f")")"
+            out="$(platform/scripts/app-state.sh "$app")"
+            state="${out%%$'\n'*}"
+            why="${out#*$'\n'}"
+            [[ "$state" == ready ]] && continue
+            # A small release ships without acceptance tests, so a stale lock
+            # does not hold it (or any app this run does not ship) back.
+            if ! jq -e --arg a "$app" 'index($a)' <<<"$BIG" >/dev/null; then
+              echo "$app: $why (not a big release in this run)"
+              continue
+            fi
+            if [[ "$MAIN" == true ]]; then
+              gh_annotate error "$app cannot ship" "$app: $why."
+              if [[ "$state" == outdated ]]; then platform/scripts/acceptance-lock.sh "$app" || true; fi
+              fail=1
+            else
+              gh_annotate notice "$app is not ready to ship" "$app: $why. Fine on a branch, required on main."
+            fi
+          done
+          exit "$fail"
+      - name: Release scripts (big or small, changed apps, verdicts, short runs)
+        run: |
+          platform/scripts/release-kind-test.sh
+          platform/scripts/changes-test.sh
+          platform/scripts/short-run-test.sh
+          platform/scripts/verdict-test.sh
+      - name: Shell scripts
+        run: |
+          shellcheck --version | head -2
+          if ! out="$(shellcheck -x -f gcc platform/scripts/*.sh e2e/*.sh)"; then
+            sed -E 's/^([^:]+):([0-9]+):([0-9]+): (.*)$/::error file=\1,line=\2,col=\3::\4/' <<<"$out"
+            exit 1
+          fi
+
+  integration:
+    needs: plan
+    if: needs.plan.outputs.platform == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30 # a stuck job must not burn Actions minutes for hours
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+      - name: Server integration test (labd with systemd and nginx, as on the server)
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q nginx sqlite3 nftables
+          sudo -E env "PATH=$PATH" platform/scripts/integration-test.sh
+
+  # The full browser matrix on a local copy of each app: on main for big
+  # releases, on a branch only in the full run on request.
+  apps:
+    needs: [plan, preview]
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.any_test == 'true' }}
+    runs-on: ${{ vars.LAB_RUNNER || 'lab-runner' }}
+    timeout-minutes: 90 # a stuck job must not burn Actions minutes for hours
+    strategy:
+      fail-fast: false
+      matrix:
+        app: ${{ fromJSON(needs.plan.outputs.test_apps) }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - name: Prototype or tested app?
+        id: kind
+        env:
+          APP: ${{ matrix.app }}
+          MAIN: ${{ needs.plan.outputs.main }}
+        run: |
+          . platform/scripts/gh-lib.sh
+          out="$(platform/scripts/app-state.sh "$APP")"
+          state="${out%%$'\n'*}"
+          why="${out#*$'\n'}"
+          if [[ "$state" == ready ]]; then
+            echo "tested=true" >>"$GITHUB_OUTPUT"
+          elif [[ "$MAIN" == true ]]; then
+            gh_annotate error "$APP cannot ship" "$APP: $why."
+            exit 1
+          else
+            echo "tested=false" >>"$GITHUB_OUTPUT"
+            gh_annotate notice "No browser tests for $APP" "$APP: $why, so no browser tests ran."
+          fi
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        if: steps.kind.outputs.tested == 'true'
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Restore the build cache
+        id: gocache
+        if: steps.kind.outputs.tested == 'true'
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: go-static-${{ runner.os }}-${{ hashFiles('go.sum', 'platform/scripts/build-app.sh') }}
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        if: steps.kind.outputs.tested == 'true'
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: e2e/package-lock.json
+      - name: Install test tools
+        if: steps.kind.outputs.tested == 'true'
+        working-directory: e2e
+        run: npm ci --no-audit --no-fund
+      - name: Cache browsers
+        if: steps.kind.outputs.tested == 'true'
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ env.PLAYWRIGHT_VERSION }}
+      - name: Install browsers
+        if: steps.kind.outputs.tested == 'true'
+        run: e2e/install-browsers.sh chromium webkit
+      - name: Acceptance tests in Chrome and Safari engines, phone and desktop
+        if: steps.kind.outputs.tested == 'true'
+        env:
+          APP: ${{ matrix.app }}
+          SHORT: ${{ contains(fromJSON(needs.plan.outputs.short_apps), matrix.app) }}
+        run: |
+          if [[ "$SHORT" == true ]]; then
+            echo "Short run: only style or documents changed since the last green full run; two browsers."
+            export E2E_PROJECTS="chromium-desktop webkit-phone"
+          fi
+          e2e/run-local.sh "$APP"
+      - name: Save the build cache for previews
+        if: steps.kind.outputs.tested == 'true' && needs.plan.outputs.main == 'true' && steps.gocache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: go-static-${{ runner.os }}-${{ hashFiles('go.sum', 'platform/scripts/build-app.sh') }}
+      # Only failed runs keep their report (it is large), and a full artifact
+      # store never blocks a run that passed.
+      - name: Keep the test report and screenshots
+        if: failure() && steps.kind.outputs.tested == 'true'
+        continue-on-error: true
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: tests-${{ matrix.app }}
+          path: |
+            e2e/playwright-report
+            e2e/test-results
+          retention-days: 14
+          if-no-files-found: ignore
+      # A full artifact store (GitHub's storage quota) must not stop a build
+      # that passed all its tests from shipping: when the upload fails, the
+      # deploy job builds the same commit again with the same script.
+      - name: The tested build exists
+        if: needs.plan.outputs.main == 'true'
+        run: test -s "dist/${{ matrix.app }}.tar.gz"
+      - name: Keep the tested build for deployment
+        if: needs.plan.outputs.main == 'true'
+        continue-on-error: true
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: bundle-${{ matrix.app }}
+          path: dist/${{ matrix.app }}.tar.gz
+          retention-days: 1 # only the deploy job of the same run needs it
+          if-no-files-found: error
+
+  # Full run on request only: the tests run against the live preview, which
+  # holds a copy of production data, so never on an ordinary push.
+  preview-tests:
+    needs: [plan, preview]
+    if: ${{ !cancelled() && needs.preview.result == 'success' && needs.plan.outputs.full == 'true' && needs.plan.outputs.any_test == 'true' }}
+    permissions:
+      contents: read
+      id-token: write
+    runs-on: ${{ vars.LAB_RUNNER || 'lab-runner' }}
+    timeout-minutes: 60 # a stuck job must not burn Actions minutes for hours
+    strategy:
+      fail-fast: false
+      matrix:
+        app: ${{ fromJSON(needs.plan.outputs.test_apps) }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - name: Prototype or tested app?
+        id: kind
+        env:
+          APP: ${{ matrix.app }}
+        run: |
+          if [[ "$(platform/scripts/app-state.sh "$APP" | head -n 1)" == ready ]]; then
+            echo "tested=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "tested=false" >>"$GITHUB_OUTPUT"
+            echo "$APP has no up-to-date acceptance tests to run against its preview"
+          fi
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        if: steps.kind.outputs.tested == 'true'
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: e2e/package-lock.json
+      - name: Install test tools
+        if: steps.kind.outputs.tested == 'true'
+        working-directory: e2e
+        run: npm ci --no-audit --no-fund
+      - name: Cache browsers
+        if: steps.kind.outputs.tested == 'true'
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ env.PLAYWRIGHT_VERSION }}
+      - name: Install browsers
+        if: steps.kind.outputs.tested == 'true'
+        run: e2e/install-browsers.sh chromium webkit
+      - name: Acceptance tests against the live preview
+        if: steps.kind.outputs.tested == 'true'
+        working-directory: e2e
+        env:
+          APP: ${{ matrix.app }}
+          URLS: ${{ needs.preview.outputs.urls }}
+          PREVIEW: ${{ needs.plan.outputs.preview }}
+          SHORT: ${{ contains(fromJSON(needs.plan.outputs.short_apps), matrix.app) }}
+        run: |
+          BASE_URL="$(jq -r --arg a "$APP" '.[$a]' <<<"$URLS")"
+          export BASE_URL
+          echo "Testing $APP at $BASE_URL"
+          # The pass through the access gate (lab.json allow_ips) lasts 15
+          # minutes, so each browser gets its own: one pass for all of them let
+          # a large suite run on after it expired, and every later test timed
+          # out at the gate. A browser that needs more than 14 minutes stops
+          # with that said, not with a row of timeouts. Two browsers (the owner,
+          # 2026-11-20): desktop Chrome and the iPhone; a short run (only
+          # style or documents changed since a green full run) has desktop
+          # Chrome only.
+          projects="chromium-desktop webkit-phone"
+          if [[ "$SHORT" == true ]]; then
+            projects="chromium-desktop"
+            echo "Short run: only style or documents changed since the last green full run."
+          fi
+          failed=""
+          for project in $projects; do
+            LAB_SESSION="$(../platform/scripts/lab-api.sh POST "/api/session?app=$APP&env=$PREVIEW" | jq -r '.cookie')"
+            echo "::add-mask::$LAB_SESSION"
+            export LAB_SESSION
+            echo "::group::$APP in $project"
+            if ! npx playwright test --project="$project" --global-timeout=840000; then
+              failed="$failed $project"
+              echo "::error::$APP failed against its preview in $project (or needed more than the 14 minutes one pass through the gate allows)"
+            fi
+            echo "::endgroup::"
+            # Keep this browser's report and screenshots: the next run clears them.
+            mkdir -p kept
+            for d in playwright-report test-results; do
+              if [[ -d "$d" ]]; then rm -rf "kept/$d-$project"; mv "$d" "kept/$d-$project"; fi
+            done
+          done
+          if [[ -n "$failed" ]]; then
+            echo "Failed in:$failed"
+            exit 1
+          fi
+      # Only failed runs keep their report (it is large), and a full artifact
+      # store never blocks a run that passed.
+      - name: Keep the test report and screenshots
+        if: failure() && steps.kind.outputs.tested == 'true'
+        continue-on-error: true
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: preview-tests-${{ matrix.app }}
+          path: e2e/kept
+          retention-days: 14
+          if-no-files-found: ignore
+
+  # The verdict for a branch: is this idea ready to ship?
+  result:
+    needs: [plan, preview, checks, integration, apps, preview-tests]
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.main != 'true' }}
+    runs-on: ${{ vars.LAB_RUNNER || 'lab-runner' }}
+    timeout-minutes: 10 # a stuck job must not burn Actions minutes for hours
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - name: Ready to ship?
+        env:
+          PREVIEW_JOB: ${{ needs.preview.result }}
+          CHECKS: ${{ needs.checks.result }}
+          VULNERABLE: ${{ needs.checks.outputs.vulnerable }}
+          INTEGRATION: ${{ needs.integration.result }}
+          APPS_JOB: ${{ needs.apps.result }}
+          PREVIEW_TESTS: ${{ needs.preview-tests.result }}
+          APPS: ${{ needs.plan.outputs.apps }}
+          BIG: ${{ needs.plan.outputs.big }}
+          QUICK: ${{ needs.plan.outputs.quick || '[]' }}
+          FULL: ${{ needs.plan.outputs.full }}
+          TEST_APPS: ${{ needs.plan.outputs.test_apps }}
+          SHORT_APPS: ${{ needs.plan.outputs.short_apps }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          . platform/scripts/gh-lib.sh
+          reasons=()
+          ok() { [[ "$1" == success || "$1" == skipped ]]; }
+          [[ "$CHECKS" == success ]] || reasons+=("unit checks $CHECKS")
+          [[ "$VULNERABLE" != true ]] || reasons+=("known vulnerabilities in the Go code or Go itself")
+          ok "$INTEGRATION" || reasons+=("server integration test $INTEGRATION")
+          ok "$APPS_JOB" || reasons+=("browser tests $APPS_JOB")
+          ok "$PREVIEW_JOB" || reasons+=("preview deploy $PREVIEW_JOB")
+          ok "$PREVIEW_TESTS" || reasons+=("tests on the live preview $PREVIEW_TESTS")
+          big="$(jq -r 'join(", ")' <<<"$BIG")"
+          small="$(jq -r --argjson b "$BIG" --argjson q "$QUICK" '. - $b - $q | join(", ")' <<<"$APPS")"
+          quick="$(jq -r 'join(", ")' <<<"$QUICK")"
+          if [[ -n "$big" ]]; then
+            for app in $(jq -r '.[]' <<<"$BIG"); do
+              out="$(platform/scripts/app-state.sh "$app")"
+              [[ "${out%%$'\n'*}" == ready ]] || reasons+=("$app: ${out#*$'\n'}")
+            done
+            if [[ "$FULL" != true ]]; then
+              reasons+=("big release of $big (SPEC.md changed or not in production yet): the agent requests the full run (gh workflow run pipeline.yml --ref $BRANCH -f full=true)")
+            fi
+            kind="big release: full tests for $big"
+            [[ -z "$small" ]] || kind+="; small release of $small"
+          elif [[ -n "$small" ]]; then
+            kind="small release of $small: acceptance tests skipped, SPEC.md unchanged"
+          elif [[ -n "$quick" ]]; then
+            kind="quick checks only: shared files changed ($quick)"
+          else
+            kind="platform only: platform checks, no app browser tests"
+          fi
+          [[ -z "$quick" || -z "$big$small" ]] || kind+="; quick checks only for $quick: shared files changed"
+          gh_summary "" "**Kind:** $kind"
+          # What the verdict covers: main reads this notice (verdict.sh) to
+          # skip the acceptance matrix for a commit that was tested here.
+          covered=""
+          if [[ "$FULL" == true ]]; then
+            tested="[]"
+            for app in $(jq -r '.[]' <<<"$TEST_APPS"); do
+              if [[ "$(platform/scripts/app-state.sh "$app" | head -n 1)" == ready ]]; then
+                tested="$(jq -c --arg a "$app" '. + [$a]' <<<"$tested")"
+              fi
+            done
+            bigtested="$(jq -c --argjson b "$BIG" '. as $t | $b | map(select(. as $a | $t | index($a)))' <<<"$tested")"
+            [[ "$tested" == "[]" ]] || covered+=" Tested apps: $(jq -r 'join(", ")' <<<"$tested")."
+            [[ "$bigtested" == "[]" ]] || covered+=" Big releases tested: $(jq -r 'join(", ")' <<<"$bigtested")."
+            if [[ "$SHORT_APPS" != "[]" ]]; then
+              gh_summary "" "**Short run** (only style or documents changed since an earlier green full run) for: $(jq -r 'join(", ")' <<<"$SHORT_APPS")"
+            fi
+          fi
+          if ((${#reasons[@]})); then
+            msg="$(printf '%s; ' "${reasons[@]}")"
+            gh_annotate notice "Not ready to ship" "${msg%; } ($kind)"
+            gh_summary "" "**Not ready to ship:** ${msg%; }"
+          else
+            gh_annotate notice "Ready to ship" "$kind. Every check passed; merging this branch into main deploys it.$covered"
+            gh_summary "" "**Ready to ship.** Every check passed."
+          fi
+
+  # Ship speed: production only after everything above passed.
+  deploy:
+    needs: [plan, checks, integration, apps]
+    if: >-
+      !cancelled() &&
+      needs.plan.result == 'success' &&
+      needs.plan.outputs.main == 'true' &&
+      needs.plan.outputs.deploy == 'true' &&
+      needs.checks.result == 'success' &&
+      (needs.integration.result == 'success' || needs.integration.result == 'skipped') &&
+      (needs.apps.result == 'success' || needs.apps.result == 'skipped')
+    runs-on: ${{ vars.LAB_RUNNER || 'lab-runner' }}
+    timeout-minutes: 30 # a stuck job must not burn Actions minutes for hours
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Get the tested builds
+        if: needs.plan.outputs.any_app == 'true'
+        # Missing when the artifact store was full; the deploy step then
+        # builds the app again from this same commit.
+        continue-on-error: true
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          # One folder per artifact (when there are several): an app's job can
+          # only provide its own build.
+          pattern: bundle-*
+          path: dist/bundles
+      - name: Restore the build cache
+        id: gocache
+        if: needs.plan.outputs.any_app == 'true'
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: go-static-${{ runner.os }}-${{ hashFiles('go.sum', 'platform/scripts/build-app.sh') }}
+      - name: Install or update labd
+        env:
+          PLATFORM_CHANGED: ${{ needs.plan.outputs.platform }}
+        run: |
+          . platform/scripts/gh-lib.sh
+          ip="$(jq -r .server_ip lab.json)"
+          sha7="${GITHUB_SHA::7}"
+          if ! health="$(curl -fsS -m 15 "http://$ip/healthz")"; then
+            gh_annotate error "Server not reachable" "$ip does not answer on port 80. Was the setup text pasted into Cloud config when the server was created?"
+            exit 1
+          fi
+          stage="$(jq -r .stage <<<"$health")"
+          if [[ "$stage" == labd && "$(jq -r .version <<<"$health")" == "$sha7" ]]; then
+            echo "labd $sha7 is already running"
+            exit 0
+          fi
+          if [[ "$stage" != seed && "$PLATFORM_CHANGED" != true ]]; then
+            echo "labd unchanged"
+            exit 0
+          fi
+          CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=$sha7" -o dist/labd ./platform/labd
+          platform/scripts/lab-api.sh POST /api/platform dist/labd
+          for _ in $(seq 1 45); do
+            v="$(curl -fsS -m 5 "http://$ip/healthz" 2>/dev/null | jq -r 'select(.stage == "labd") | .version' 2>/dev/null || true)"
+            if [[ "$v" == "$sha7" ]]; then
+              gh_annotate notice "labd" "labd $sha7 is running on $ip"
+              exit 0
+            fi
+            sleep 2
+          done
+          gh_annotate error "labd did not start" "labd $sha7 did not come up within 60 seconds on $ip"
+          exit 1
+      - name: Apply settings from lab.json
+        run: |
+          jq '{domain: (.domain // ""), public_ip: .server_ip, allow_ips: (.allow_ips // [])}' lab.json >"$RUNNER_TEMP/settings.json"
+          platform/scripts/lab-api.sh POST /api/settings "$RUNNER_TEMP/settings.json"
+      - name: Deploy to production
+        id: apps
+        if: needs.plan.outputs.any_app == 'true'
+        env:
+          APPS: ${{ needs.plan.outputs.apps }}
+          BIG: ${{ needs.plan.outputs.big }}
+          QUICK: ${{ needs.plan.outputs.quick || '[]' }}
+          ACCEPTED: ${{ needs.plan.outputs.accepted }}
+          ACCEPTED_RUN: ${{ needs.plan.outputs.accepted_run }}
+        run: |
+          . platform/scripts/gh-lib.sh
+          urls="{}"
+          gh_summary "### Shipped" "" "| App | Kind | Address |" "|---|---|---|"
+          for app in $(jq -r '.[]' <<<"$APPS"); do
+            echo "Deploying $app to production"
+            if jq -e --arg a "$app" 'index($a)' <<<"$ACCEPTED" >/dev/null; then
+              # Big release whose acceptance tests ran on the branch for this
+              # very commit: no matrix here, but built here, with vet and unit
+              # tests already passed in `checks`.
+              kind="big release: acceptance tests accepted from the branch run $ACCEPTED_RUN"
+              bundle="$(platform/scripts/build-app.sh "$app")"
+              gh_annotate notice "$app: tests accepted" "The full run on the branch for this same commit ($ACCEPTED_RUN) tested this big release and ended \"Ready to ship\"."
+            elif jq -e --arg a "$app" 'index($a)' <<<"$QUICK" >/dev/null; then
+              # Only a shared file changed: quick checks only (build, vet and
+              # unit tests passed in `checks`), then this deploy with its
+              # health and smoke checks and rollback.
+              kind="quick checks only: shared files changed"
+              bundle="$(platform/scripts/build-app.sh "$app")"
+              gh_annotate notice "$app: quick checks only" "Its own folder did not change, only shared files: no browser matrix, built here after vet and unit tests."
+            elif ! jq -e --arg a "$app" 'index($a)' <<<"$BIG" >/dev/null; then
+              # Small release: SPEC.md unchanged, no acceptance tests. Spec
+              # first still holds (release-kind.sh calls a missing SPEC.md big).
+              kind="small release: acceptance tests skipped, SPEC.md unchanged"
+              bundle="$(platform/scripts/build-app.sh "$app")"
+              gh_annotate notice "$app: small release" "Acceptance tests skipped, SPEC.md unchanged since production."
+            else
+              kind="big release: full tests"
+              bundle="dist/bundles/bundle-$app/$app.tar.gz"
+              if [[ ! -f "$bundle" && "$(jq length <<<"$BIG")" == 1 ]]; then
+                bundle="dist/bundles/$app.tar.gz" # a single artifact comes without its folder
+              fi
+            fi
+            if [[ ! -f "$bundle" ]]; then
+              # The artifact store refused the tested build (storage quota).
+              # Build the same commit again with the same script: the tests
+              # that gate this job ran on exactly this code.
+              gh_annotate notice "Built $app again" "The artifact store did not keep the tested build of $app, so it was built again from this commit ($GITHUB_SHA) before deploying."
+              bundle="$(platform/scripts/build-app.sh "$app")"
+            fi
+            if ! out="$(platform/scripts/lab-api.sh POST "/api/deploy?app=$app&env=prod&commit=$GITHUB_SHA" "$bundle")"; then
+              msg="$(jq -r '.error // empty' <<<"$out" 2>/dev/null || true)"
+              logs="$(jq -r '.logs // empty' <<<"$out" 2>/dev/null | tail -n 40 || true)"
+              gh_annotate error "Deploy of $app failed" "${msg:-${out:-no answer from labd; see the job log}}"$'\n'"$logs"
+              gh_summary "| $app | $kind | failed: ${msg:-see log} |"
+              exit 1
+            fi
+            url="$(jq -r .url <<<"$out")"
+            gh_annotate notice "Deployed $app (prod)" "$url ($kind)"
+            gh_summary "| $app | $kind | $url |"
+            urls="$(jq -c --arg a "$app" --arg u "$url" '. + {($a): $u}' <<<"$urls")"
+          done
+          echo "urls=$urls" >>"$GITHUB_OUTPUT"
+      - name: The app sandbox is in force
+        run: |
+          . platform/scripts/gh-lib.sh
+          # labd hardens the server and restarts apps into a new sandbox in
+          # the background after it starts; wait for that first.
+          for _ in $(seq 1 60); do
+            status="$(platform/scripts/lab-api.sh GET /api/status)"
+            [[ "$(jq -r '.sandbox.settled // false' <<<"$status")" == true ]] && break
+            sleep 5
+          done
+          sandbox="$(jq -c '.sandbox // {}' <<<"$status")"
+          echo "sandbox: $sandbox"
+          if [[ "$(jq -r '.hardened // false' <<<"$sandbox")" != true || "$(jq -r '.firewall // ""' <<<"$sandbox")" != applied ]]; then
+            gh_annotate error "App sandbox" "The hardened sandbox or the app firewall is not in force on the server: $sandbox"
+            exit 1
+          fi
+          basic="$(jq -r '[.instances[] | select(.env == "prod" and .sandbox == "basic") | .app] | join(", ")' <<<"$status")"
+          if [[ -n "$basic" ]]; then
+            gh_annotate error "App sandbox" "These production apps fell back to the basic sandbox: $basic (see their logs)"
+            exit 1
+          fi
+          stopped="$(jq -r '[.instances[] | select(.status != "running") | "\(.app) (\(.env)): \(.note // .status)"] | join("; ")' <<<"$status")"
+          if [[ -n "$stopped" ]]; then
+            gh_annotate warning "Not running" "$stopped"
+          fi
+      - name: Smoke check production
+        if: needs.plan.outputs.any_app == 'true'
+        env:
+          URLS: ${{ steps.apps.outputs.urls }}
+        run: |
+          . platform/scripts/gh-lib.sh
+          for app in $(jq -r 'keys[]' <<<"$URLS"); do
+            url="$(jq -r --arg a "$app" '.[$a]' <<<"$URLS")"
+            # A short-lived pass through the access gate (lab.json allow_ips).
+            cookie="$(platform/scripts/lab-api.sh POST "/api/session?app=$app&env=prod" | jq -r '.cookie')"
+            echo "::add-mask::$cookie"
+            code="$(curl -sS -o /dev/null -w '%{http_code}' -m 20 -b "lab_session=$cookie" "$url/" || true)"
+            if [[ "$code" != 200 ]]; then
+              gh_annotate error "Smoke check failed for $app" "$url answered $code; rolling back to the previous release"
+              platform/scripts/lab-api.sh POST "/api/rollback?app=$app&env=prod" || true
+              exit 1
+            fi
+            echo "$app: $url answers 200"
+          done
+      # Small releases build here, not in the browser-test job, so keep the
+      # build cache warm for previews from here too.
+      - name: Save the build cache for previews
+        if: needs.plan.outputs.any_app == 'true' && steps.gocache.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: go-static-${{ runner.os }}-${{ hashFiles('go.sum', 'platform/scripts/build-app.sh') }}

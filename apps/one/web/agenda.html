@@ -1,0 +1,76 @@
+{{define "agenda-body"}}<div class="ag-filters">
+  <label class="ag-f"><span>Person</span><select id="ag-person" data-filter="person">{{range .Persons}}<option value="{{.Value}}">{{.Label}}</option>{{end}}</select></label>
+  <label class="ag-f"><span>Calendar</span><select id="ag-cal" data-filter="cal">{{range .Calendars}}<option value="{{.Value}}">{{.Label}}</option>{{end}}</select></label>
+</div>
+<div class="ag-events" id="ag-events" data-zone="{{.Zone}}">
+  {{- if .Empty}}<p class="empty">No events.</p>{{end}}
+  <p class="empty" id="ag-none" hidden>No events match.</p>
+  {{- if .Earlier}}<p class="ag-earlier-note">Showing earlier entries first.</p>{{end}}
+  {{- range .Days}}
+  <section class="ag-day{{if .Today}} today{{end}}{{if .Past}} past{{end}}"{{if .Today}} id="ag-today"{{end}}>
+    <h3>{{.Heading}}</h3>
+    <ul>
+      {{- range .Events}}
+      {{- if .IsNow}}
+      <li class="ag-now" id="ag-now" data-at="{{.StartAt}}"><span class="ag-now-text">{{.NowText}}</span></li>
+      {{- else}}
+      <li class="ag-ev{{if .Mark}} off{{end}}{{if .CanDone}} has-done{{end}}{{if .Past}} over{{end}}{{if .Running}} running{{end}}" tabindex="0" data-person="{{.PersonKey}}" data-cals="{{.CalKeys}}"{{if .Timed}} data-start="{{.StartAt}}" data-end="{{.EndAt}}"{{end}}>
+        <span class="ag-time">{{.Time}}{{if .Until}} <span class="ag-until">{{.Until}}</span>{{end}}</span>
+        <span class="ag-main">
+          <span class="ag-title">{{.Title}}</span>{{if .Mark}} <span class="ag-mark">{{.Mark}}</span>{{end}}{{if .Tentative}} <span class="ag-mark">Tentative</span>{{end}}{{if and .Timed (not .Mark)}} <span class="ag-mark ag-run"{{if not .Running}} hidden{{end}}>Running now</span>{{end}}
+          {{- if .Place}}<span class="ag-meta">{{.Place}}</span>{{end}}
+          <span class="ag-meta ag-calline"><span>{{.Calendars}}{{if .Whose}} · {{.Whose}}{{end}}</span>{{if .ThreadID}}<a class="ag-thread-link" href="/items/{{.ThreadID}}">Thread</a>{{end}}</span>
+        </span>
+        {{- if .CanDone}}
+        <form method="post" action="/agenda/{{.ID}}/done" data-ajax="agenda"><button type="submit" class="tertiary ag-done">Done</button></form>
+        {{- end}}
+        {{- if .CanOpen}}
+        <form method="post" action="/agenda/{{.ID}}/thread" class="ag-open"><button type="submit" class="tertiary ag-thread">Open thread</button></form>
+        {{- end}}
+        {{- if .Props}}{{template "ag-props" .Props}}{{end}}
+      </li>
+      {{- end}}
+      {{- end}}
+    </ul>
+  </section>
+  {{- end}}
+  {{- if .HasEarlier}}
+  <form method="get" action="/agenda" data-ajax="agenda-earlier"><input type="hidden" name="earlier" value="1"><button type="submit" class="secondary ag-earlier">Show earlier</button></form>
+  {{- end}}
+</div>
+<section class="ag-todos" aria-labelledby="ag-todo-h">
+  <div class="ag-todo-head"><h3 id="ag-todo-h">To do</h3><span class="ag-count" aria-hidden="true">{{len .Todos}}</span></div>
+  {{- if not .Todos}}<p class="empty">Nothing to do.</p>{{end}}
+  <ul>
+    {{- range .Todos}}
+    <li class="ag-td">
+      <span class="ag-main"><span class="ag-title">{{.Text}}</span>{{if .Due}}<span class="ag-meta ag-due">{{.Due}}</span>{{end}}{{if .Number}}<a class="ag-meta" href="/items/{{.ItemID}}">{{.Number}}</a>{{end}}</span>
+      <form method="post" action="/agenda/{{.ID}}/done" data-ajax="agenda"><button type="submit" class="tertiary ag-done"><span class="ag-done-t">Done</span></button></form>
+    </li>
+    {{- end}}
+  </ul>
+  {{template "ag-props" .Proposals}}
+</section>
+<form method="post" action="/agenda/todos" class="ag-add" data-ajax="agenda">
+  <label for="ag-new">Add a to-do</label>
+  <div class="ag-add-row"><input type="text" id="ag-new" name="text" maxlength="300" autocomplete="off" enterkeyhint="done"><button type="submit">Add</button></div>
+  <p class="say-error" id="ag-error" role="alert" hidden></p>
+</form>
+{{end}}
+
+{{define "ag-props"}}{{if .}}<ul class="ag-props">
+  {{- range .}}
+  <li class="ag-prop">
+    <p class="by"><b>{{.By}}</b> <span class="mark mark-proposal">Proposal</span></p>
+    {{- range .Lines}}
+    <p class="ag-pl">{{if .Struck}}<s>{{.Text}}</s>{{else}}{{if .Prefix}}<span class="k">{{.Prefix}}</span> {{end}}<span class="ag-pt">{{.Text}}</span>{{end}}{{if .Due}} <span class="ag-meta ag-due">{{.Due}}</span>{{end}}</p>
+    {{- end}}
+    {{- if .Reason}}
+    <p class="reason">{{.Reason}}</p>{{end}}
+    <div class="prop-acts">
+      <form method="post" action="/agenda/proposals/{{.ID}}/approve" class="prop-act" data-ajax="agenda"><button type="submit">Approve</button></form>
+      <form method="post" action="/agenda/proposals/{{.ID}}/dismiss" class="prop-act" data-ajax="agenda"><button type="submit" class="secondary">Dismiss</button></form>
+    </div>
+  </li>
+  {{- end}}
+</ul>{{end}}{{end}}

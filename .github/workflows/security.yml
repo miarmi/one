@@ -1,0 +1,186 @@
+name: security
+# The security agent's scanner: every 6 hours it audits the server through
+# labd (GET /api/host/audit), checks our Go code and Go itself for known
+# vulnerabilities, fixes what is safe to fix by itself (installs security
+# updates, restarts the server when an update asked for it) and tells the owner's
+# phone what it did. The daily Claude scheduled task reads the audit (the
+# run's "security-audit" artifact, or the same data printed into the job log)
+# and opens pull requests for everything else.
+#
+# Pushes go through labd (POST /api/notify, with this job's OIDC token like
+# every other call), which hands them to the Notify app on the server; no
+# token is stored in GitHub. Critical audit findings are pushed by labd
+# itself the moment the audit runs, so this workflow only reports its own
+# actions.
+
+on:
+  schedule:
+    - cron: '23 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      fix:
+        description: Install security updates and restart when needed
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  audit:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ${{ vars.LAB_RUNNER || 'lab-runner' }}
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Audit the server
+        id: audit
+        run: |
+          . platform/scripts/gh-lib.sh
+          if [[ -z "$(jq -r '.server_ip // ""' lab.json)" ]]; then
+            echo "::notice::No server configured in lab.json"
+            echo "skip=true" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+          mkdir -p dist/security
+          if ! platform/scripts/lab-api.sh GET /api/host/audit >dist/security/audit.json; then
+            gh_annotate error "Audit failed" "labd did not answer GET /api/host/audit; is the server up? (The heartbeat should have said.)"
+            echo "worst=unreachable" >>"$GITHUB_OUTPUT"
+            exit 1
+          fi
+          worst="$(jq -r .worst dist/security/audit.json)"
+          echo "worst=$worst" >>"$GITHUB_OUTPUT"
+          echo "critical=$(jq '[.findings[] | select(.severity == "critical")] | length' dist/security/audit.json)" >>"$GITHUB_OUTPUT"
+          echo "warnings=$(jq '[.findings[] | select(.severity == "warning")] | length' dist/security/audit.json)" >>"$GITHUB_OUTPUT"
+          echo "security_updates=$(jq -r '.host.updates.security // 0' dist/security/audit.json)" >>"$GITHUB_OUTPUT"
+          echo "reboot_required=$(jq -r '.host.reboot_required // false' dist/security/audit.json)" >>"$GITHUB_OUTPUT"
+          table="$(jq -r '"| Severity | What |", "|---|---|", (.findings[] | "| \(.severity) | \(.text) |")' dist/security/audit.json)"
+          if [[ "$(jq '.findings | length' dist/security/audit.json)" == 0 ]]; then
+            table="Nothing found. The server looks the way it should."
+          fi
+          gh_summary "### Server audit ($(jq -r .at dist/security/audit.json)): $worst" "" "$table" "" \
+            "Listening: $(jq -r '[.listening[]? | "\(.proto) \(.address):\(.port) \(.process)"] | join(", ")' dist/security/audit.json)" \
+            "Firewall: input drop $(jq -r '.firewall.input_drop' dist/security/audit.json), apps table $(jq -r '.firewall.lab_apps' dist/security/audit.json), ruleset $(jq -r '.firewall.ruleset_sha256[0:12]' dist/security/audit.json)" \
+            "Certificates: $(jq -r '[.certificates[]? | "\(.host) \(.days_left) d"] | join(", ")' dist/security/audit.json)" \
+            "nginx last $(jq -r .window_hours dist/security/audit.json) h: $(jq -r '.nginx | "\(.requests) requests, \(.status["4xx"]) refused, \(.status["5xx"]) failed"' dist/security/audit.json)" \
+            "Updates waiting: $(jq -r '.host.updates.pending // "?"' dist/security/audit.json) ($(jq -r '.host.updates.security // "?"' dist/security/audit.json) security); restart needed: $(jq -r '.host.reboot_required' dist/security/audit.json)" \
+            "Sign-in failures (24 h): $(jq '.sign_in_failures_24h | length' dist/security/audit.json)"
+          if [[ "$worst" == critical ]]; then
+            gh_annotate error "Critical findings" "$(jq -r '[.findings[] | select(.severity == "critical") | .text] | join("; ")' dist/security/audit.json)"
+          fi
+          # The artifact lives on GitHub's blob storage, which the daily review
+          # cannot always reach; the job log is always readable.
+          echo "::group::audit.json"
+          jq . dist/security/audit.json
+          echo "::endgroup::"
+
+      - name: Known vulnerabilities in our Go code and Go itself
+        id: vuln
+        if: steps.audit.outputs.skip != 'true'
+        run: |
+          . platform/scripts/gh-lib.sh
+          set +e
+          out="$(go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./... 2>&1)"
+          rc=$?
+          set -e
+          echo "$out" >dist/security/govulncheck.txt
+          echo "::group::govulncheck"
+          printf '%s\n' "$out"
+          echo "::endgroup::"
+          case "$rc" in
+            0) echo "ids=" >>"$GITHUB_OUTPUT"; gh_summary "" "Go vulnerabilities: none reach our code." ;;
+            3)
+              ids="$(grep -oE 'GO-[0-9]{4}-[0-9]+' <<<"$out" | sort -u | tr '\n' ' ')"
+              echo "ids=$ids" >>"$GITHUB_OUTPUT"
+              gh_annotate warning "Known Go vulnerabilities" "Our code reaches: $ids. The daily Claude task opens a pull request with the fix (a newer Go or module)."
+              gh_summary "" "Go vulnerabilities our code reaches: $ids" '```' "$(tail -n 40 <<<"$out")" '```'
+              ;;
+            *) echo "ids=" >>"$GITHUB_OUTPUT"; gh_annotate warning "Vulnerability check did not run" "$(tail -n 20 <<<"$out")" ;;
+          esac
+
+      - name: Install security updates
+        id: upgrade
+        if: steps.audit.outputs.skip != 'true' && steps.audit.outputs.security_updates != '0' && (github.event_name == 'schedule' || inputs.fix)
+        run: |
+          . platform/scripts/gh-lib.sh
+          if out="$(platform/scripts/lab-api.sh POST /api/host/upgrade)"; then
+            echo "started=true" >>"$GITHUB_OUTPUT"
+            gh_summary "" "Started installing ${{ steps.audit.outputs.security_updates }} security update(s) on the server. The next run restarts the server if one asks for it."
+          else
+            echo "started=false" >>"$GITHUB_OUTPUT"
+            gh_annotate warning "Could not start the upgrade" "$out"
+          fi
+
+      - name: Restart the server for a waiting update
+        id: reboot
+        if: steps.audit.outputs.skip != 'true' && steps.audit.outputs.reboot_required == 'true' && (github.event_name == 'schedule' || inputs.fix)
+        run: |
+          . platform/scripts/gh-lib.sh
+          out="$(platform/scripts/lab-api.sh POST '/api/host/reboot?if_required=1')"
+          if [[ "$(jq -r .rebooting <<<"$out")" == true ]]; then
+            echo "rebooted=true" >>"$GITHUB_OUTPUT"
+            gh_summary "" "Restarted the server: an installed update asked for it. The apps come back by themselves."
+          else
+            echo "rebooted=false" >>"$GITHUB_OUTPUT"
+          fi
+
+      # A full artifact store (GitHub's storage quota) loses the file for the
+      # daily review, but the audit itself, the fixes and the push still count:
+      # the run summary above keeps the findings.
+      - name: Keep the audit for the daily review
+        if: steps.audit.outputs.skip != 'true' && always()
+        continue-on-error: true
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: security-audit
+          path: dist/security/
+          retention-days: 30
+          if-no-files-found: ignore
+
+      - name: Tell the owner's phone
+        if: steps.audit.outputs.skip != 'true' && always()
+        env:
+          WORST: ${{ steps.audit.outputs.worst }}
+          UPGRADE_STARTED: ${{ steps.upgrade.outputs.started }}
+          REBOOTED: ${{ steps.reboot.outputs.rebooted }}
+          SECURITY_UPDATES: ${{ steps.audit.outputs.security_updates }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          . platform/scripts/gh-lib.sh
+          if [[ "$WORST" == unreachable ]]; then
+            gh_summary "" "No push sent: labd did not answer, so nothing on the server can push. The missing daily heartbeat and GitHub's failure e-mail say so."
+            exit 0
+          fi
+          send() { # topic title body
+            jq -n --arg topic "$1" --arg title "$2" --arg body "$3" --arg url "$RUN_URL" \
+              '{topic: $topic, title: $title, body: $body, url: $url}' >"$RUNNER_TEMP/notify.json"
+            if out="$(platform/scripts/lab-api.sh POST /api/notify "$RUNNER_TEMP/notify.json")"; then
+              if [[ "$(jq -r .delivered <<<"$out")" == true ]]; then
+                gh_summary "" "Pushed to the owner's phone: $2"
+              else
+                gh_summary "" "Push not delivered (Notify is not running in production or has no token yet): $2"
+              fi
+            else
+              gh_annotate warning "Push failed" "labd did not accept the message: $out"
+            fi
+          }
+          if [[ "$REBOOTED" == true ]]; then
+            send lab "Server restarting for updates" "An installed update asked for a restart. The apps come back by themselves."
+          elif [[ "$UPGRADE_STARTED" == true ]]; then
+            send lab "Installing $SECURITY_UPDATES security update(s)" "Started on the server by the security agent."
+          fi

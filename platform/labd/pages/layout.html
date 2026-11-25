@@ -1,0 +1,21 @@
+{{define "layout"}}<!doctype html>
+<html lang="{{.Lang}}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<meta name="color-scheme" content="light dark">
+<title>{{.Title}}</title>
+<link rel="stylesheet" href="/_lab/lab.css">
+<link rel="apple-touch-icon" href="/_lab/icon.png">
+<link rel="icon" href="/_lab/icon.png">
+<link rel="manifest" href="/_lab/manifest.webmanifest">
+<meta name="apple-mobile-web-app-title" content="Lab">
+</head>
+<body>
+<main>
+{{template "content" .}}
+</main>
+</body>
+</html>
+{{end}}

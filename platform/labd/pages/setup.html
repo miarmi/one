@@ -1,0 +1,18 @@
+{{define "content"}}<h1>{{.Title}}</h1>
+{{if .NoForm}}<p class="info" role="status">{{.Info}}</p>
+<a class="button" href="/_lab/login">{{.T.SignInLink}}</a>
+{{else}}<p>{{.T.SetupIntro}}</p>
+{{with .Error}}<p class="error" role="alert">{{.}}</p>{{end}}
+<form method="post" action="/_lab/setup">
+{{if .CodeHidden}}<input type="hidden" name="code" value="{{.Code}}">
+{{else}}<label for="code">{{.T.SetupCode}}</label>
+<input id="code" name="code" value="{{.Code}}" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" maxlength="64" required{{if not .Code}} autofocus{{end}}>
+{{end}}<input class="visually-hidden" type="text" name="username" value="lab" autocomplete="username" tabindex="-1" aria-hidden="true" readonly>
+<label for="password">{{.T.NewPassword}}</label>
+<input id="password" name="password" type="password" autocomplete="new-password" minlength="12" maxlength="1024" aria-describedby="password-hint" required{{if .CodeHidden}} autofocus{{end}}>
+<p class="hint" id="password-hint">{{.T.PasswordHint}}</p>
+<label for="password2">{{.T.RepeatPassword}}</label>
+<input id="password2" name="password2" type="password" autocomplete="new-password" minlength="12" maxlength="1024" required>
+<button type="submit">{{.T.SavePassword}}</button>
+</form>
+{{end}}{{end}}

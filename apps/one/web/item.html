@@ -1,0 +1,10 @@
+{{template "head" .Item.Title}}
+<body class="page-list page-item">
+{{template "topbar" .}}
+<main class="list-page" id="list" data-since="{{.Item.Since}}">
+  <ol class="rows solo">{{template "row" .Item.Row}}</ol>
+</main>
+<footer><span class="env">Environment: {{.EnvText}}</span><span>Version: {{.Version}}</span></footer>
+<script src="/static/app.js"></script>
+</body>
+</html>
